@@ -3,66 +3,28 @@ import argparse
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
 from typing import Any, Dict, Optional
 
-from deepplan import add_evidence, load_plan, plan_summary, qa_report, save_plan
-
-
-def merge_plan_updates(plan: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
-    scalar_fields = [
-        "goal",
-        "success_metric",
-        "deadline",
-        "planning_horizon",
-        "review_cadence",
-        "selected_option",
-    ]
-    list_fields = [
-        "phase_plan",
-        "constraints",
-        "assumptions",
-        "options",
-        "plan_tasks",
-        "execution_tasks",
-        "dependencies",
-        "experiments",
-        "risks",
-        "references",
-        "insights",
-        "direction_insights",
-        "market_insights",
-        "timing_insights",
-        "differentiation_insights",
-        "monetization_insights",
-        "constraint_insights",
-        "risk_signal_insights",
-        "evolution_insights",
-        "definition_of_done",
-    ]
-
-    for field in scalar_fields:
-        if field in payload and isinstance(payload[field], str):
-            plan[field] = payload[field].strip()
-    for field in list_fields:
-        if field in payload and isinstance(payload[field], list):
-            plan[field] = payload[field]
-    return plan
+from deepplan_agent import execute_tool, list_tools, natural_language_to_tool
 
 
 class DeepPlanHandler(BaseHTTPRequestHandler):
     server_version = "DeepPlanHTTP/0.1"
 
     def do_GET(self) -> None:
-        if self.path == "/health":
+        path = urlparse(self.path).path
+        if path == "/health":
             self._write_json(HTTPStatus.OK, {"status": "ok"})
             return
-        if self.path == "/plan":
-            plan = load_plan()
-            self._write_json(HTTPStatus.OK, {"plan": plan, "summary": plan_summary(plan)})
+        if path == "/plan":
+            self._write_json(HTTPStatus.OK, execute_tool("get_plan", {}))
             return
-        if self.path == "/qa":
-            plan = load_plan()
-            self._write_json(HTTPStatus.OK, qa_report(plan))
+        if path == "/qa":
+            self._write_json(HTTPStatus.OK, execute_tool("get_qa", {}))
+            return
+        if path == "/tools":
+            self._write_json(HTTPStatus.OK, {"tools": list_tools()})
             return
         self._write_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
@@ -70,38 +32,45 @@ class DeepPlanHandler(BaseHTTPRequestHandler):
         payload = self._read_json()
         if payload is None:
             return
+        path = urlparse(self.path).path
 
-        if self.path == "/plan":
-            plan = load_plan()
-            plan = merge_plan_updates(plan, payload)
-            save_plan(plan)
-            self._write_json(
-                HTTPStatus.OK,
-                {"plan": plan, "summary": plan_summary(plan), "qa": qa_report(plan)},
-            )
+        if path == "/plan":
+            self._write_json(HTTPStatus.OK, execute_tool("update_plan", payload))
             return
 
-        if self.path == "/evidence":
-            claim = str(payload.get("claim", "")).strip()
-            if not claim:
-                self._write_json(HTTPStatus.BAD_REQUEST, {"error": "claim is required"})
+        if path == "/evidence":
+            try:
+                self._write_json(HTTPStatus.OK, execute_tool("add_evidence", payload))
+            except ValueError as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+
+        if path == "/agent/act":
+            prompt = str(payload.get("input", "")).strip()
+            if not prompt:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"error": "input is required"})
                 return
-            plan = load_plan()
-            add_evidence(
-                plan,
-                claim,
-                str(payload.get("source", "api")).strip() or "api",
-                int(payload.get("confidence", 60)),
-                str(payload.get("axis", "")).strip(),
-                str(payload.get("date", "")).strip(),
-            )
-            if isinstance(payload.get("reference"), str) and payload["reference"].strip():
-                plan.setdefault("references", []).append(payload["reference"].strip())
-            save_plan(plan)
-            self._write_json(
-                HTTPStatus.OK,
-                {"plan": plan, "summary": plan_summary(plan), "qa": qa_report(plan)},
-            )
+            try:
+                tool_name, tool_input = natural_language_to_tool(prompt)
+                result = execute_tool(tool_name, tool_input)
+            except ValueError as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._write_json(HTTPStatus.OK, {"tool": tool_name, "input": tool_input, "result": result})
+            return
+
+        if path.startswith("/tools/"):
+            tool_name = path.split("/", 2)[2].strip()
+            tool_input = payload.get("input", payload)
+            if not isinstance(tool_input, dict):
+                self._write_json(HTTPStatus.BAD_REQUEST, {"error": "tool input must be a JSON object"})
+                return
+            try:
+                result = execute_tool(tool_name, tool_input)
+            except ValueError as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._write_json(HTTPStatus.OK, {"tool": tool_name, "input": tool_input, "result": result})
             return
 
         self._write_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})

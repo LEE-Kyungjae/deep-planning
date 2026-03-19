@@ -88,6 +88,7 @@ In this thesis:
 - Shared plan format (`schemas/plan.schema.json`)
 - CLI (`deepplan.py`)
 - Minimal local HTTP service (`deepplan_server.py`)
+- Agent wrapper + tool schema (`deepplan_agent.py`)
 - Automatic quality checks on `plan` and `replan`
 - Local state in `/.deeplan/`
 
@@ -167,6 +168,9 @@ python3 deepplan.py hypothesis --hypothesis "Narrow segment will adopt weekly" -
 python3 deepplan.py insight --topic "AI planning co-work" --references "success:linear,fail:overbuild,counter:no-code tools" --apply
 python3 deepplan.py review --period "week-1" --signals "low-activation,weak-retention" --apply
 python3 deepplan.py show
+python3 deepplan_agent.py tools
+python3 deepplan_agent.py run --input '/deepplan.qa'
+python3 deepplan_agent.py run --input 'show plan'
 python3 deepplan_server.py --port 8787
 ```
 
@@ -198,18 +202,49 @@ Available endpoints:
 - `GET /health`: service health check
 - `GET /plan`: full current plan + derived summary
 - `GET /qa`: QA report as JSON
+- `GET /tools`: available tool schemas for agent/tool callers
 - `POST /plan`: update core plan fields using a JSON object
 - `POST /evidence`: append one evidence item using JSON
+- `POST /tools/<tool_name>`: run one tool with `{"input": {...}}`
+- `POST /agent/act`: map slash/natural-language input to a tool call
 
 Example:
 
 ```bash
 curl http://127.0.0.1:8787/plan
 curl http://127.0.0.1:8787/qa
+curl http://127.0.0.1:8787/tools
 curl -X POST http://127.0.0.1:8787/evidence \
   -H 'Content-Type: application/json' \
   -d '{"claim":"User pain repeated in interviews","source":"interview-notes","confidence":72,"axis":"market"}'
+curl -X POST http://127.0.0.1:8787/tools/add_hypothesis \
+  -H 'Content-Type: application/json' \
+  -d '{"input":{"hypothesis":"Narrow segment returns weekly","metric":"weekly-active-pilot-users","target":">=20","window":"14 days"}}'
+curl -X POST http://127.0.0.1:8787/agent/act \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"/deepplan.evidence claim=\"Repeated pain in interviews\" source=interviews confidence=75 axis=market"}'
 ```
+
+## Agent Wrapper
+
+DeepPlan now includes a local wrapper for slash-style and lightweight natural-language control:
+
+```bash
+python3 deepplan_agent.py tools
+python3 deepplan_agent.py run --input '/deepplan.show'
+python3 deepplan_agent.py run --input '/deepplan.plan goal="Ship local agent layer" planning_horizon="4 weeks" review_cadence=weekly'
+python3 deepplan_agent.py run --input '/deepplan.evidence claim="Repeated planning pain" source=interviews confidence=72 axis=market'
+python3 deepplan_agent.py run --input 'show plan'
+python3 deepplan_agent.py run --input 'qa'
+```
+
+Supported slash commands:
+
+- `/deepplan.plan`
+- `/deepplan.show`
+- `/deepplan.qa`
+- `/deepplan.evidence`
+- `/deepplan.hypothesis`
 
 ## Slash Command Mapping
 
