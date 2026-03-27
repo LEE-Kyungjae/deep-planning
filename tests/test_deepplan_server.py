@@ -159,6 +159,18 @@ class DeepPlanServerTests(unittest.TestCase):
         self.assertTrue(payload["revisions"])
         self.assertEqual(payload["revisions"][0]["source"], "update_plan")
 
+    def test_get_health_returns_storage_diagnostics(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            handler = build_handler("GET", "/health")
+            handler.do_GET()
+            status, payload, _headers = decode_response(handler)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("logs", payload)
+        self.assertIn("revisions", payload["logs"])
+
 
 if __name__ == "__main__":
     unittest.main()

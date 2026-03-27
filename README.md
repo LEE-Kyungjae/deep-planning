@@ -187,6 +187,7 @@ python3 deepplan_server.py --port 8787
 - `risk`: add risk record
 - `qa`: run QA checks manually
 - `validate`: validate plan structure and nested record types
+- `health`: print storage health, parseability, and recovery diagnostics
 - `show`: print current plan summary, including the latest auto-replan signal when present
 - `history`: print recent revision snapshots
 - `restore`: restore the current plan from a recorded revision snapshot
@@ -214,7 +215,7 @@ python3 deepplan_server.py --host 127.0.0.1 --port 8787
 
 Available endpoints:
 
-- `GET /health`: service health check
+- `GET /health`: storage health, parseability, and recovery diagnostics
 - `GET /plan`: full current plan + derived summary, plus a `fingerprint` field and `ETag` header
 - `GET /qa`: QA report as JSON
 - `GET /history`: recent revision snapshots
@@ -237,6 +238,7 @@ Example:
 ```bash
 curl http://127.0.0.1:8787/plan
 curl http://127.0.0.1:8787/qa
+curl http://127.0.0.1:8787/health
 curl http://127.0.0.1:8787/history
 curl http://127.0.0.1:8787/validate
 curl http://127.0.0.1:8787/tools
@@ -265,6 +267,7 @@ DeepPlan now includes a local wrapper for slash-style and lightweight natural-la
 ```bash
 python3 deepplan_agent.py tools
 python3 deepplan_agent.py run --input '/deepplan.show'
+python3 deepplan_agent.py run --input '/deepplan.health'
 python3 deepplan_agent.py run --input '/deepplan.plan goal="Ship local agent layer" planning_horizon="4 weeks" review_cadence=weekly'
 python3 deepplan_agent.py run --input '/deepplan.replan evidence="Pilot retention improved" evidence_confidence=70 evidence_axis=market'
 python3 deepplan_agent.py run --input '/deepplan.history'
@@ -279,6 +282,7 @@ Supported slash commands:
 - `/deepplan.plan`
 - `/deepplan.replan`
 - `/deepplan.show`
+- `/deepplan.health`
 - `/deepplan.history`
 - `/deepplan.restore`
 - `/deepplan.qa`
@@ -294,6 +298,7 @@ Bundled wrapper behavior:
 - `/deepplan` and `/deepplan.plan` -> `update_plan` tool payload
 - `/deepplan.replan` -> `replan` tool payload
 - `/deepplan.show` -> `get_plan`
+- `/deepplan.health` -> `get_health`
 - `/deepplan.history` -> `get_history`
 - `/deepplan.restore` -> `restore_revision`
 - `/deepplan.qa` -> `get_qa`

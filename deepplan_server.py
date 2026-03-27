@@ -16,7 +16,9 @@ class DeepPlanHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/health":
-            self._write_json(HTTPStatus.OK, {"status": "ok"})
+            result = execute_tool("get_health", {})
+            status = HTTPStatus.OK if result.get("status") == "ok" else HTTPStatus.SERVICE_UNAVAILABLE if result.get("status") == "error" else HTTPStatus.OK
+            self._write_json(status, result)
             return
         if path == "/plan":
             result = execute_tool("get_plan", {})

@@ -480,6 +480,28 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertIn(revisions[0]["revision_id"], history_stdout.getvalue())
         self.assertIn("Restored revision", restore_stdout.getvalue())
 
+    def test_storage_health_report_detects_invalid_event_lines(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            deepplan.EVENTS_PATH.write_text('{"type":"ok"}\nnot-json\n', encoding="utf-8")
+            report = deepplan.storage_health_report()
+
+        self.assertEqual(report["status"], "degraded")
+        self.assertEqual(report["logs"]["events"]["invalid_lines"], 1)
+        self.assertTrue(any(issue.startswith("events_invalid_lines:1") for issue in report["issues"]))
+
+    def test_cmd_health_prints_storage_diagnostics(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                deepplan.cmd_health(type("Args", (), {"json": False})())
+            output = stdout.getvalue()
+
+        self.assertIn("Status:", output)
+        self.assertIn("Revision Count:", output)
+        self.assertIn("Writable:", output)
+
 
 if __name__ == "__main__":
     unittest.main()

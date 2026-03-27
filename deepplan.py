@@ -416,6 +416,119 @@ def read_jsonl(path: Path) -> List[Dict]:
     return items
 
 
+def jsonl_health(path: Path) -> Dict:
+    if not path.exists():
+        return {
+            "path": str(path),
+            "exists": False,
+            "line_count": 0,
+            "valid_objects": 0,
+            "invalid_lines": 0,
+            "last_error": "",
+        }
+    line_count = 0
+    valid_objects = 0
+    invalid_lines = 0
+    last_error = ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        line_count += 1
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            invalid_lines += 1
+            last_error = str(exc)
+            continue
+        if isinstance(payload, dict):
+            valid_objects += 1
+        else:
+            invalid_lines += 1
+            last_error = "line is not a JSON object"
+    return {
+        "path": str(path),
+        "exists": True,
+        "line_count": line_count,
+        "valid_objects": valid_objects,
+        "invalid_lines": invalid_lines,
+        "last_error": last_error,
+    }
+
+
+def storage_health_report() -> Dict:
+    ensure_state()
+    issues: List[str] = []
+    plan_exists = PLAN_PATH.exists()
+    plan_parseable = False
+    plan_valid = False
+    plan_error = ""
+    current_fingerprint = ""
+    revision_count = 0
+    try:
+        plan = load_plan()
+        plan_parseable = True
+        validation = validate_plan_shape(plan)
+        plan_valid = validation["valid"]
+        if not validation["valid"]:
+            issues.extend(validation["errors"])
+        current_fingerprint = plan_fingerprint(plan)
+    except Exception as exc:
+        plan_error = str(exc)
+        issues.append(f"plan_load_failed:{exc}")
+
+    event_log = jsonl_health(EVENTS_PATH)
+    revision_log = jsonl_health(REVISIONS_PATH)
+    decision_log = jsonl_health(DECISIONS_PATH)
+    risk_log = jsonl_health(RISKS_PATH)
+    revision_count = revision_log["valid_objects"]
+    for label, report in [
+        ("events", event_log),
+        ("revisions", revision_log),
+        ("decisions", decision_log),
+        ("risks", risk_log),
+    ]:
+        if report["invalid_lines"]:
+            issues.append(f"{label}_invalid_lines:{report['invalid_lines']}")
+
+    writable = True
+    writable_error = ""
+    try:
+        probe = STATE_DIR / ".healthcheck.tmp"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except Exception as exc:
+        writable = False
+        writable_error = str(exc)
+        issues.append(f"write_failed:{exc}")
+
+    status = "ok"
+    if issues:
+        status = "degraded"
+    if not plan_parseable or not writable:
+        status = "error"
+
+    return {
+        "status": status,
+        "state_dir": str(STATE_DIR),
+        "plan_exists": plan_exists,
+        "plan_parseable": plan_parseable,
+        "plan_valid": plan_valid,
+        "plan_error": plan_error,
+        "current_fingerprint": current_fingerprint,
+        "revision_count": revision_count,
+        "writable": writable,
+        "writable_error": writable_error,
+        "logs": {
+            "events": event_log,
+            "revisions": revision_log,
+            "decisions": decision_log,
+            "risks": risk_log,
+        },
+        "issues": issues,
+    }
+
+
 def list_revisions(limit: int = 10) -> List[Dict]:
     items = [item for item in read_jsonl(REVISIONS_PATH) if isinstance(item, dict)]
     if limit <= 0:
@@ -896,6 +1009,7 @@ def plan_summary(plan: Dict) -> Dict:
         if non_empty(plan.get(key))
     )
     recent_auto_replan = last_auto_replan_event(plan)
+    health = storage_health_report()
     return {
         "goal": plan.get("goal"),
         "success_metric": plan.get("success_metric"),
@@ -915,6 +1029,11 @@ def plan_summary(plan: Dict) -> Dict:
         "evidence_count": len(evidence_objects(plan)),
         "hypothesis_count": len(plan.get("hypothesis_log", [])),
         "risk_count": len(plan.get("risks", [])),
+        "storage_health": {
+            "status": health["status"],
+            "revision_count": health["revision_count"],
+            "issues": health["issues"],
+        },
         "recent_auto_replan": {
             "blocked": recent_auto_replan.get("blocked", []),
             "actions": recent_auto_replan.get("actions", []),
@@ -1472,6 +1591,26 @@ def cmd_validate(_: argparse.Namespace) -> None:
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
 
+def cmd_health(args: argparse.Namespace) -> None:
+    report = storage_health_report()
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return
+    print(f"Status: {report['status']}")
+    print(f"State Dir: {report['state_dir']}")
+    print(f"Plan Parseable: {'yes' if report['plan_parseable'] else 'no'}")
+    print(f"Plan Valid: {'yes' if report['plan_valid'] else 'no'}")
+    print(f"Writable: {'yes' if report['writable'] else 'no'}")
+    print(f"Revision Count: {report['revision_count']}")
+    print(f"Current Fingerprint: {report['current_fingerprint'] or 'n/a'}")
+    if report["issues"]:
+        print("Issues:")
+        for issue in report["issues"]:
+            print(f"- {issue}")
+    else:
+        print("Issues: none")
+
+
 def cmd_show(_: argparse.Namespace) -> None:
     plan = load_plan()
     summary = plan_summary(plan)
@@ -1493,6 +1632,7 @@ def cmd_show(_: argparse.Namespace) -> None:
     print(f"Evidence Items: {summary['evidence_count']}")
     print(f"Hypotheses: {summary['hypothesis_count']}")
     print(f"Risks: {summary['risk_count']}")
+    print(f"Storage Health: {summary['storage_health']['status']}")
     revisions = list_revisions(limit=1)
     print(f"Revision Count: {len(read_jsonl(REVISIONS_PATH))}")
     if revisions:
@@ -1920,6 +2060,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("validate")
     s.set_defaults(func=cmd_validate)
+
+    s = sub.add_parser("health")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_health)
 
     s = sub.add_parser("show")
     s.set_defaults(func=cmd_show)

@@ -19,6 +19,7 @@ from deepplan import (
     qa_autoreplan_result,
     qa_report,
     save_validated_plan,
+    storage_health_report,
     validate_plan_shape,
 )
 
@@ -64,6 +65,11 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "get_qa",
         "description": "Return the weighted QA report for the current plan.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "get_health",
+        "description": "Return storage health, parseability, and recovery diagnostics.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
@@ -376,6 +382,9 @@ def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if name == "get_qa":
         return qa_report(load_plan())
 
+    if name == "get_health":
+        return storage_health_report()
+
     if name == "get_history":
         validate_history_payload(payload)
         return {"revisions": list_revisions(int(payload.get("limit", 10)))}
@@ -531,6 +540,7 @@ def slash_to_tool(command: str) -> Tuple[str, Dict[str, Any]]:
         "/deepplan.show": "get_plan",
         "/deepplan.history": "get_history",
         "/deepplan.restore": "restore_revision",
+        "/deepplan.health": "get_health",
         "/deepplan.qa": "get_qa",
         "/deepplan.validate": "validate_plan",
         "/deepplan.evidence": "add_evidence",
@@ -549,6 +559,8 @@ def natural_language_to_tool(text: str) -> Tuple[str, Dict[str, Any]]:
         return slash_to_tool(stripped)
     if any(phrase in lowered for phrase in ["qa", "quality check", "quality status"]):
         return "get_qa", {}
+    if any(phrase in lowered for phrase in ["health", "status health", "storage health"]):
+        return "get_health", {}
     if any(phrase in lowered for phrase in ["history", "revision history", "plan history"]):
         return "get_history", {}
     if any(phrase in lowered for phrase in ["validate plan", "plan validation", "check plan structure"]):
