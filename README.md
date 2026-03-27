@@ -329,6 +329,11 @@ client = DeepPlanClient.from_http("127.0.0.1", 8787)
 cycle = client.get_cycle(history_limit=5)
 plan = client.get_plan()
 updated = client.update_plan({"goal": "Ship local agent layer"})
+wrapped = client.apply_and_get_cycle(
+    "update_plan",
+    {"goal": "Ship local agent layer", "success_metric": "Reach 2 pilots", "deadline": "2026-04-03"},
+    history_limit=3,
+)
 cycle_result = client.capture_evidence_cycle(
     {"claim": "Pilot friction repeated", "source": "pilot-call", "confidence": 74, "axis": "market"},
     replan_payload={"plan_task": "Tighten onboarding loop"},

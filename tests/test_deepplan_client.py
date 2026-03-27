@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 import deepplan
-from deepplan_client import DeepPlanClient, DeepPlanClientError
+from deepplan_client import DeepPlanClient, DeepPlanClientError, DeepPlanClientOperationError
 from deepplan_server import DeepPlanHandler
 
 
@@ -180,6 +180,41 @@ class DeepPlanClientTests(unittest.TestCase):
         self.assertEqual(result["post_cycle"]["plan"]["evidence"][-1]["source"], "pilot-call")
         self.assertEqual(result["post_cycle"]["history_limit"], 2)
         self.assertEqual(client.tracked_fingerprint, result["post_fingerprint"])
+        self.assertIn("add_evidence", result["step_results"])
+        self.assertIn("replan", result["step_results"])
+
+    def test_apply_and_get_cycle_wraps_update_plan_with_post_cycle_snapshot(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            client = DeepPlanClient(transport=handler_transport)
+            result = client.apply_and_get_cycle(
+                "update_plan",
+                {
+                    "goal": "wrapped update",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                },
+                history_limit=1,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["operation"], "update_plan")
+        self.assertEqual(result["mutation_result"]["plan"]["goal"], "wrapped update")
+        self.assertEqual(result["post_cycle"]["plan"]["goal"], "wrapped update")
+        self.assertEqual(result["post_cycle"]["history_limit"], 1)
+        self.assertEqual(client.tracked_fingerprint, result["post_fingerprint"])
+
+    def test_apply_and_get_cycle_surfaces_typed_operation_error(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            client = DeepPlanClient(transport=handler_transport)
+            with self.assertRaises(DeepPlanClientOperationError) as ctx:
+                client.apply_and_get_cycle("add_evidence", {"claim": " "})
+
+        self.assertEqual(ctx.exception.operation, "add_evidence")
+        self.assertEqual(ctx.exception.step, "mutation")
+        self.assertEqual(ctx.exception.status, 400)
+        self.assertEqual(ctx.exception.payload["error"], "claim is required")
 
     def test_stale_fingerprint_raises_client_error(self):
         with DeepPlanStateIsolation():

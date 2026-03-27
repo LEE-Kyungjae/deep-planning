@@ -14,6 +14,17 @@ class DeepPlanClientError(RuntimeError):
         self.headers = headers
 
 
+class DeepPlanClientOperationError(RuntimeError):
+    def __init__(self, operation: str, step: str, cause: DeepPlanClientError) -> None:
+        super().__init__(f"{operation} failed during {step}: {cause}")
+        self.operation = operation
+        self.step = step
+        self.cause = cause
+        self.status = cause.status
+        self.payload = cause.payload
+        self.headers = cause.headers
+
+
 RequestTransport = Callable[[str, str, Optional[Dict[str, Any]], Optional[Dict[str, str]]], Tuple[int, Dict[str, Any], Dict[str, str]]]
 
 
@@ -75,6 +86,31 @@ class DeepPlanClient:
             raise DeepPlanClientError(status, payload, response_headers)
         return payload
 
+    def _build_cycle_operation_result(
+        self,
+        *,
+        operation: str,
+        before: Dict[str, Any],
+        mutation_result: Dict[str, Any],
+        after: Dict[str, Any],
+        step_results: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        before_score = int(before.get("qa", {}).get("score", 0))
+        after_score = int(after.get("qa", {}).get("score", 0))
+        return {
+            "ok": True,
+            "operation": operation,
+            "result_type": "planning_cycle",
+            "pre_fingerprint": before.get("fingerprint", ""),
+            "post_fingerprint": after.get("fingerprint", ""),
+            "changed_fields": diff_top_level_fields(before.get("plan", {}), after.get("plan", {})),
+            "qa_delta": after_score - before_score,
+            "mutation_result": mutation_result,
+            "step_results": step_results,
+            "pre_cycle": before,
+            "post_cycle": after,
+        }
+
     def get_plan(self) -> Dict[str, Any]:
         return self.request("GET", "/plan")
 
@@ -123,6 +159,37 @@ class DeepPlanClient:
             expected_fingerprint = self.tracked_fingerprint
         return self.request("POST", "/restore", body=payload, expected_fingerprint=expected_fingerprint)
 
+    def apply_and_get_cycle(
+        self,
+        operation: str,
+        payload: Dict[str, Any],
+        *,
+        history_limit: int = 10,
+    ) -> Dict[str, Any]:
+        mutation_map = {
+            "update_plan": self.update_plan,
+            "replan": self.replan,
+            "add_evidence": self.add_evidence,
+        }
+        if operation not in mutation_map:
+            raise ValueError(f"unsupported operation: {operation}")
+        before = self.get_cycle(history_limit=history_limit)
+        try:
+            mutation_result = mutation_map[operation](payload)
+        except DeepPlanClientError as exc:
+            raise DeepPlanClientOperationError(operation, "mutation", exc) from exc
+        try:
+            after = self.get_cycle(history_limit=history_limit)
+        except DeepPlanClientError as exc:
+            raise DeepPlanClientOperationError(operation, "post_cycle", exc) from exc
+        return self._build_cycle_operation_result(
+            operation=operation,
+            before=before,
+            mutation_result=mutation_result,
+            after=after,
+            step_results={operation: mutation_result},
+        )
+
     def capture_evidence_cycle(
         self,
         evidence_payload: Dict[str, Any],
@@ -131,7 +198,10 @@ class DeepPlanClient:
         history_limit: int = 10,
     ) -> Dict[str, Any]:
         before = self.get_cycle(history_limit=history_limit)
-        evidence_result = self.add_evidence(evidence_payload)
+        try:
+            evidence_result = self.add_evidence(evidence_payload)
+        except DeepPlanClientError as exc:
+            raise DeepPlanClientOperationError("capture_evidence_cycle", "add_evidence", exc) from exc
         replan_input = dict(replan_payload or {})
         claim = str(evidence_payload.get("claim", "")).strip()
         source = str(evidence_payload.get("source", "")).strip()
@@ -148,20 +218,24 @@ class DeepPlanClient:
             replan_input["evidence_axis"] = axis
         if date and "evidence_date" not in replan_input:
             replan_input["evidence_date"] = date
-        replan_result = self.replan(replan_input)
-        after = self.get_cycle(history_limit=history_limit)
-        before_score = int(before.get("qa", {}).get("score", 0))
-        after_score = int(after.get("qa", {}).get("score", 0))
-        return {
-            "ok": True,
-            "operation": "capture_evidence_cycle",
-            "result_type": "planning_cycle",
-            "pre_fingerprint": before.get("fingerprint", ""),
-            "post_fingerprint": after.get("fingerprint", ""),
-            "changed_fields": diff_top_level_fields(before.get("plan", {}), after.get("plan", {})),
-            "qa_delta": after_score - before_score,
-            "evidence_result": evidence_result,
-            "replan_result": replan_result,
-            "pre_cycle": before,
-            "post_cycle": after,
-        }
+        try:
+            replan_result = self.replan(replan_input)
+        except DeepPlanClientError as exc:
+            raise DeepPlanClientOperationError("capture_evidence_cycle", "replan", exc) from exc
+        try:
+            after = self.get_cycle(history_limit=history_limit)
+        except DeepPlanClientError as exc:
+            raise DeepPlanClientOperationError("capture_evidence_cycle", "post_cycle", exc) from exc
+        result = self._build_cycle_operation_result(
+            operation="capture_evidence_cycle",
+            before=before,
+            mutation_result=replan_result,
+            after=after,
+            step_results={
+                "add_evidence": evidence_result,
+                "replan": replan_result,
+            },
+        )
+        result["evidence_result"] = evidence_result
+        result["replan_result"] = replan_result
+        return result
