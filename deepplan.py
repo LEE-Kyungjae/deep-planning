@@ -18,6 +18,8 @@ DECISIONS_PATH = STATE_DIR / "decisions.jsonl"
 RISKS_PATH = STATE_DIR / "risks.jsonl"
 EVENTS_PATH = STATE_DIR / "events.jsonl"
 REVISIONS_PATH = STATE_DIR / "revisions.jsonl"
+EVENT_RETENTION_LIMIT = 1000
+REVISION_RETENTION_LIMIT = 100
 STATE_LOCK = None
 
 
@@ -419,6 +421,10 @@ STORE = FilePlanStore(
     ensure_valid_plan=ensure_valid_plan,
     qa_autoreplan_result=lambda *args, **kwargs: qa_autoreplan_result(*args, **kwargs),
     revision_metadata_builder=revision_metadata,
+    retention_limits={
+        "events": EVENT_RETENTION_LIMIT,
+        "revisions": REVISION_RETENTION_LIMIT,
+    },
 )
 STATE_LOCK = STORE.lock
 
@@ -430,6 +436,10 @@ def _sync_store_paths() -> None:
     STORE.risks_path = RISKS_PATH
     STORE.events_path = EVENTS_PATH
     STORE.revisions_path = REVISIONS_PATH
+    STORE.retention_limits = {
+        "events": EVENT_RETENTION_LIMIT,
+        "revisions": REVISION_RETENTION_LIMIT,
+    }
 
 
 def plan_response(plan: Dict) -> Dict:
@@ -529,6 +539,11 @@ def jsonl_health(path: Path) -> Dict:
     return STORE.jsonl_health(path)
 
 
+def maintenance_report(apply: bool = False) -> Dict:
+    _sync_store_paths()
+    return STORE.maintenance_report(apply=apply)
+
+
 def storage_health_report() -> Dict:
     ensure_state()
     issues: List[str] = []
@@ -569,6 +584,8 @@ def storage_health_report() -> Dict:
     ]:
         if report["invalid_lines"]:
             issues.append(f"{label}_invalid_lines:{report['invalid_lines']}")
+        if report.get("over_limit_by", 0):
+            issues.append(f"{label}_over_retention:{report['over_limit_by']}")
 
     revisions = list_revisions(limit=1)
     if revisions:
@@ -624,6 +641,7 @@ def storage_health_report() -> Dict:
             "decisions": decision_log,
             "risks": risk_log,
         },
+        "retention": maintenance_report(apply=False),
         "issues": issues,
     }
 
@@ -1813,12 +1831,29 @@ def cmd_health(args: argparse.Namespace) -> None:
     print(f"Current Fingerprint: {report['current_fingerprint'] or 'n/a'}")
     print(f"Latest Recoverable Revision: {report['latest_recoverable_revision_id'] or 'n/a'}")
     print(f"Current Matches Latest Revision: {'yes' if report['current_matches_latest_revision'] else 'no'}")
+    for label, entry in report["retention"]["logs"].items():
+        if entry["retention_limit"] > 0:
+            print(f"{label.title()} Retention: {entry['line_count']}/{entry['retention_limit']}")
     if report["issues"]:
         print("Issues:")
         for issue in report["issues"]:
             print(f"- {issue}")
     else:
         print("Issues: none")
+
+
+def cmd_maintenance(args: argparse.Namespace) -> None:
+    report = maintenance_report(apply=bool(args.apply))
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return
+    print(f"Applied: {'yes' if report['applied'] else 'no'}")
+    for label, entry in report["logs"].items():
+        limit = entry["retention_limit"]
+        print(
+            f"{label}: lines={entry['line_count']} limit={limit or 'unbounded'} "
+            f"pruned={entry.get('pruned_lines', 0)}"
+        )
 
 
 def cmd_show(_: argparse.Namespace) -> None:
@@ -2312,6 +2347,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("health")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_health)
+
+    s = sub.add_parser("maintenance")
+    s.add_argument("--apply", action="store_true")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_maintenance)
 
     s = sub.add_parser("show")
     s.set_defaults(func=cmd_show)

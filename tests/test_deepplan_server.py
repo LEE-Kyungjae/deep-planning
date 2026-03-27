@@ -25,6 +25,8 @@ class DeepPlanStateIsolation:
             "RISKS_PATH": deepplan.RISKS_PATH,
             "EVENTS_PATH": deepplan.EVENTS_PATH,
             "REVISIONS_PATH": deepplan.REVISIONS_PATH,
+            "EVENT_RETENTION_LIMIT": deepplan.EVENT_RETENTION_LIMIT,
+            "REVISION_RETENTION_LIMIT": deepplan.REVISION_RETENTION_LIMIT,
         }
         deepplan.ROOT = self.root
         deepplan.STATE_DIR = self.state_dir
@@ -43,6 +45,8 @@ class DeepPlanStateIsolation:
         deepplan.RISKS_PATH = self.originals["RISKS_PATH"]
         deepplan.EVENTS_PATH = self.originals["EVENTS_PATH"]
         deepplan.REVISIONS_PATH = self.originals["REVISIONS_PATH"]
+        deepplan.EVENT_RETENTION_LIMIT = self.originals["EVENT_RETENTION_LIMIT"]
+        deepplan.REVISION_RETENTION_LIMIT = self.originals["REVISION_RETENTION_LIMIT"]
         self.tempdir.cleanup()
 
 
@@ -175,6 +179,43 @@ class DeepPlanServerTests(unittest.TestCase):
         self.assertIn("logs", payload)
         self.assertIn("revisions", payload["logs"])
         self.assertIn("recovery_candidate_available", payload)
+
+    def test_get_health_reports_retained_log_counts_after_prune(self):
+        with DeepPlanStateIsolation():
+            deepplan.EVENT_RETENTION_LIMIT = 2
+            deepplan.REVISION_RETENTION_LIMIT = 2
+            deepplan.ensure_state()
+            first = deepplan.mutate_plan_state(
+                lambda plan: plan.update(
+                    {
+                        "goal": "server prune first",
+                        "success_metric": "Reach 2 pilots",
+                        "deadline": "2026-04-03",
+                    }
+                ),
+                revision_source="test_server_prune",
+            )
+            second = deepplan.mutate_plan_state(
+                lambda plan: plan.update({"goal": "server prune second"}),
+                expected_fingerprint=deepplan.plan_fingerprint(first),
+                revision_source="test_server_prune",
+            )
+            deepplan.mutate_plan_state(
+                lambda plan: plan.update({"goal": "server prune third"}),
+                expected_fingerprint=deepplan.plan_fingerprint(second),
+                revision_source="test_server_prune",
+            )
+            deepplan.append_jsonl(deepplan.EVENTS_PATH, {"type": "evt1"})
+            deepplan.append_jsonl(deepplan.EVENTS_PATH, {"type": "evt2"})
+            deepplan.append_jsonl(deepplan.EVENTS_PATH, {"type": "evt3"})
+            handler = build_handler("GET", "/health")
+            handler.do_GET()
+            status, payload, _headers = decode_response(handler)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["logs"]["events"]["line_count"], 2)
+        self.assertEqual(payload["logs"]["revisions"]["line_count"], 2)
 
     def test_preview_restore_tool_wrapper_returns_diff_summary(self):
         with DeepPlanStateIsolation():

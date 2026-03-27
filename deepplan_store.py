@@ -31,6 +31,7 @@ class FilePlanStore:
         ensure_valid_plan: Callable[[Dict], Dict],
         qa_autoreplan_result: Callable[..., Dict],
         revision_metadata_builder: Optional[Callable[[Dict], Dict]] = None,
+        retention_limits: Optional[Dict[str, int]] = None,
         lock: Optional[threading.RLock] = None,
     ) -> None:
         self.state_dir = state_dir
@@ -47,6 +48,7 @@ class FilePlanStore:
         self.ensure_valid_plan = ensure_valid_plan
         self.qa_autoreplan_result = qa_autoreplan_result
         self.revision_metadata_builder = revision_metadata_builder
+        self.retention_limits = dict(retention_limits or {})
         self.lock = lock or threading.RLock()
 
     def ensure_state(self) -> None:
@@ -98,10 +100,114 @@ class FilePlanStore:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+        self._best_effort_prune_unlocked(path)
 
     def append_jsonl(self, path: Path, payload: Dict) -> None:
         with self.lock:
             self.append_jsonl_unlocked(path, payload)
+
+    def _retention_label_for_path(self, path: Path) -> str:
+        if path == self.events_path:
+            return "events"
+        if path == self.revisions_path:
+            return "revisions"
+        if path == self.decisions_path:
+            return "decisions"
+        if path == self.risks_path:
+            return "risks"
+        return path.name
+
+    def _retention_limit_for_path(self, path: Path) -> int:
+        label = self._retention_label_for_path(path)
+        limit = int(self.retention_limits.get(label, 0) or 0)
+        if label == "revisions" and limit > 0:
+            return max(2, limit)
+        return limit
+
+    def prune_jsonl_unlocked(self, path: Path, keep_latest: int) -> Dict:
+        label = self._retention_label_for_path(path)
+        if keep_latest <= 0:
+            return {
+                "path": str(path),
+                "label": label,
+                "retention_limit": 0,
+                "before_count": 0,
+                "after_count": 0,
+                "pruned_lines": 0,
+                "pruned": False,
+            }
+        if not path.exists():
+            return {
+                "path": str(path),
+                "label": label,
+                "retention_limit": keep_latest,
+                "before_count": 0,
+                "after_count": 0,
+                "pruned_lines": 0,
+                "pruned": False,
+            }
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        before_count = len(lines)
+        if before_count <= keep_latest:
+            return {
+                "path": str(path),
+                "label": label,
+                "retention_limit": keep_latest,
+                "before_count": before_count,
+                "after_count": before_count,
+                "pruned_lines": 0,
+                "pruned": False,
+            }
+        kept_lines = lines[-keep_latest:]
+        body = "\n".join(kept_lines) + "\n"
+        self.atomic_write_text(path, body)
+        return {
+            "path": str(path),
+            "label": label,
+            "retention_limit": keep_latest,
+            "before_count": before_count,
+            "after_count": len(kept_lines),
+            "pruned_lines": before_count - len(kept_lines),
+            "pruned": True,
+        }
+
+    def _best_effort_prune_unlocked(self, path: Path) -> None:
+        keep_latest = self._retention_limit_for_path(path)
+        if keep_latest <= 0:
+            return
+        try:
+            self.prune_jsonl_unlocked(path, keep_latest)
+        except Exception:
+            return
+
+    def maintenance_report_unlocked(self, apply: bool = False) -> Dict:
+        logs: Dict[str, Dict] = {}
+        for path in [self.events_path, self.revisions_path]:
+            label = self._retention_label_for_path(path)
+            keep_latest = self._retention_limit_for_path(path)
+            if apply:
+                report = self.prune_jsonl_unlocked(path, keep_latest)
+                report["line_count"] = report["after_count"]
+                report["over_limit_by"] = max(0, report["after_count"] - keep_latest) if keep_latest > 0 else 0
+            else:
+                line_count = 0
+                if path.exists():
+                    line_count = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+                report = {
+                    "path": str(path),
+                    "label": label,
+                    "retention_limit": keep_latest,
+                    "line_count": line_count,
+                    "over_limit_by": max(0, line_count - keep_latest) if keep_latest > 0 else 0,
+                    "pruned": False,
+                    "pruned_lines": 0,
+                }
+            logs[label] = report
+        return {"applied": apply, "logs": logs}
+
+    def maintenance_report(self, apply: bool = False) -> Dict:
+        with self.lock:
+            return self.maintenance_report_unlocked(apply=apply)
 
     def make_revision_entry(self, plan: Dict, source: str, reason: str = "", previous_fingerprint: str = "") -> Dict:
         fingerprint = self.plan_fingerprint(plan)
@@ -175,6 +281,7 @@ class FilePlanStore:
         return items
 
     def jsonl_health(self, path: Path) -> Dict:
+        retention_limit = self._retention_limit_for_path(path)
         if not path.exists():
             return {
                 "path": str(path),
@@ -183,6 +290,8 @@ class FilePlanStore:
                 "valid_objects": 0,
                 "invalid_lines": 0,
                 "last_error": "",
+                "retention_limit": retention_limit,
+                "over_limit_by": 0,
             }
         line_count = 0
         valid_objects = 0
@@ -211,4 +320,6 @@ class FilePlanStore:
             "valid_objects": valid_objects,
             "invalid_lines": invalid_lines,
             "last_error": last_error,
+            "retention_limit": retention_limit,
+            "over_limit_by": max(0, line_count - retention_limit) if retention_limit > 0 else 0,
         }

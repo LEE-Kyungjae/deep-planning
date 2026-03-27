@@ -26,6 +26,8 @@ class DeepPlanStateIsolation:
             "RISKS_PATH": deepplan.RISKS_PATH,
             "EVENTS_PATH": deepplan.EVENTS_PATH,
             "REVISIONS_PATH": deepplan.REVISIONS_PATH,
+            "EVENT_RETENTION_LIMIT": deepplan.EVENT_RETENTION_LIMIT,
+            "REVISION_RETENTION_LIMIT": deepplan.REVISION_RETENTION_LIMIT,
         }
         deepplan.ROOT = self.root
         deepplan.STATE_DIR = self.state_dir
@@ -44,6 +46,8 @@ class DeepPlanStateIsolation:
         deepplan.RISKS_PATH = self.originals["RISKS_PATH"]
         deepplan.EVENTS_PATH = self.originals["EVENTS_PATH"]
         deepplan.REVISIONS_PATH = self.originals["REVISIONS_PATH"]
+        deepplan.EVENT_RETENTION_LIMIT = self.originals["EVENT_RETENTION_LIMIT"]
+        deepplan.REVISION_RETENTION_LIMIT = self.originals["REVISION_RETENTION_LIMIT"]
         self.tempdir.cleanup()
 
 

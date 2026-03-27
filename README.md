@@ -190,6 +190,8 @@ python3 deepplan_server.py --port 8787
 - `schema`: print the runtime schema, check for drift, or rewrite `schemas/plan.schema.json`
 - `health`: print storage health, parseability, and recovery diagnostics
   - includes latest recoverable revision and whether the current plan matches it
+  - includes current event/revision retention windows
+- `maintenance`: inspect retention state or prune bounded operational logs with `--apply`
 - `show`: print current plan summary, including the latest auto-replan signal when present
 - `history`: print recent revision snapshots
 - `restore`: restore the current plan from a recorded revision snapshot
@@ -286,6 +288,7 @@ python3 deepplan_agent.py run --input '/deepplan.evidence claim="Repeated planni
 python3 deepplan_agent.py run --input 'show plan'
 python3 deepplan_agent.py run --input 'qa'
 python3 deepplan.py schema --check
+python3 deepplan.py maintenance --apply
 ```
 
 Supported slash commands:

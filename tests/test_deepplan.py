@@ -26,6 +26,8 @@ class DeepPlanStateIsolation:
             "RISKS_PATH": deepplan.RISKS_PATH,
             "EVENTS_PATH": deepplan.EVENTS_PATH,
             "REVISIONS_PATH": deepplan.REVISIONS_PATH,
+            "EVENT_RETENTION_LIMIT": deepplan.EVENT_RETENTION_LIMIT,
+            "REVISION_RETENTION_LIMIT": deepplan.REVISION_RETENTION_LIMIT,
         }
         deepplan.ROOT = self.root
         deepplan.STATE_DIR = self.state_dir
@@ -44,6 +46,8 @@ class DeepPlanStateIsolation:
         deepplan.RISKS_PATH = self.originals["RISKS_PATH"]
         deepplan.EVENTS_PATH = self.originals["EVENTS_PATH"]
         deepplan.REVISIONS_PATH = self.originals["REVISIONS_PATH"]
+        deepplan.EVENT_RETENTION_LIMIT = self.originals["EVENT_RETENTION_LIMIT"]
+        deepplan.REVISION_RETENTION_LIMIT = self.originals["REVISION_RETENTION_LIMIT"]
         self.tempdir.cleanup()
 
 
@@ -636,6 +640,80 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertEqual(report["logs"]["events"]["invalid_lines"], 1)
         self.assertTrue(any(issue.startswith("events_invalid_lines:1") for issue in report["issues"]))
 
+    def test_revision_retention_prunes_to_latest_window(self):
+        with DeepPlanStateIsolation():
+            deepplan.REVISION_RETENTION_LIMIT = 2
+            deepplan.ensure_state()
+            first = deepplan.mutate_plan_state(
+                lambda plan: plan.update(
+                    {
+                        "goal": "retained first",
+                        "success_metric": "Reach 2 pilots",
+                        "deadline": "2026-04-03",
+                    }
+                ),
+                revision_source="test_retention",
+            )
+            second = deepplan.mutate_plan_state(
+                lambda plan: plan.update({"goal": "retained second"}),
+                expected_fingerprint=deepplan.plan_fingerprint(first),
+                revision_source="test_retention",
+            )
+            deepplan.mutate_plan_state(
+                lambda plan: plan.update({"goal": "retained third"}),
+                expected_fingerprint=deepplan.plan_fingerprint(second),
+                revision_source="test_retention",
+            )
+            revisions = deepplan.list_revisions(limit=0)
+
+        self.assertEqual(len(revisions), 2)
+        self.assertEqual([item["metadata"]["goal"] for item in revisions], ["retained third", "retained second"])
+
+    def test_restore_previous_survives_revision_pruning_floor(self):
+        with DeepPlanStateIsolation():
+            deepplan.REVISION_RETENTION_LIMIT = 1
+            deepplan.ensure_state()
+            first = deepplan.mutate_plan_state(
+                lambda plan: plan.update(
+                    {
+                        "goal": "restore floor first",
+                        "success_metric": "Reach 2 pilots",
+                        "deadline": "2026-04-03",
+                    }
+                ),
+                revision_source="test_restore_floor",
+            )
+            second = deepplan.mutate_plan_state(
+                lambda plan: plan.update({"goal": "restore floor second"}),
+                expected_fingerprint=deepplan.plan_fingerprint(first),
+                revision_source="test_restore_floor",
+            )
+            deepplan.mutate_plan_state(
+                lambda plan: plan.update({"goal": "restore floor third"}),
+                expected_fingerprint=deepplan.plan_fingerprint(second),
+                revision_source="test_restore_floor",
+            )
+            restored = deepplan_agent.execute_tool(
+                "restore_revision",
+                {
+                    "previous": True,
+                    "expected_fingerprint": deepplan.plan_fingerprint(deepplan.load_plan()),
+                },
+            )
+
+        self.assertEqual(restored["plan"]["goal"], "restore floor second")
+
+    def test_event_retention_prunes_to_latest_window(self):
+        with DeepPlanStateIsolation():
+            deepplan.EVENT_RETENTION_LIMIT = 2
+            deepplan.ensure_state()
+            deepplan.append_jsonl(deepplan.EVENTS_PATH, {"type": "evt1"})
+            deepplan.append_jsonl(deepplan.EVENTS_PATH, {"type": "evt2"})
+            deepplan.append_jsonl(deepplan.EVENTS_PATH, {"type": "evt3"})
+            events = deepplan.read_jsonl(deepplan.EVENTS_PATH)
+
+        self.assertEqual([event["type"] for event in events], ["evt2", "evt3"])
+
     def test_storage_health_report_tracks_latest_recoverable_revision(self):
         with DeepPlanStateIsolation():
             deepplan.ensure_state()
@@ -673,6 +751,43 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertFalse(report["current_matches_latest_revision"])
         self.assertIn("current_plan_differs_from_latest_revision", report["issues"])
 
+    def test_storage_health_report_includes_retention_limits_after_prune(self):
+        with DeepPlanStateIsolation():
+            deepplan.EVENT_RETENTION_LIMIT = 2
+            deepplan.REVISION_RETENTION_LIMIT = 2
+            deepplan.ensure_state()
+            first = deepplan.mutate_plan_state(
+                lambda plan: plan.update(
+                    {
+                        "goal": "health retention first",
+                        "success_metric": "Reach 2 pilots",
+                        "deadline": "2026-04-03",
+                    }
+                ),
+                revision_source="test_health_retention",
+            )
+            second = deepplan.mutate_plan_state(
+                lambda plan: plan.update({"goal": "health retention second"}),
+                expected_fingerprint=deepplan.plan_fingerprint(first),
+                revision_source="test_health_retention",
+            )
+            deepplan.mutate_plan_state(
+                lambda plan: plan.update({"goal": "health retention third"}),
+                expected_fingerprint=deepplan.plan_fingerprint(second),
+                revision_source="test_health_retention",
+            )
+            deepplan.append_jsonl(deepplan.EVENTS_PATH, {"type": "evt1"})
+            deepplan.append_jsonl(deepplan.EVENTS_PATH, {"type": "evt2"})
+            deepplan.append_jsonl(deepplan.EVENTS_PATH, {"type": "evt3"})
+            report = deepplan.storage_health_report()
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["logs"]["events"]["retention_limit"], 2)
+        self.assertEqual(report["logs"]["events"]["line_count"], 2)
+        self.assertEqual(report["logs"]["revisions"]["retention_limit"], 2)
+        self.assertEqual(report["logs"]["revisions"]["line_count"], 2)
+        self.assertEqual(report["retention"]["logs"]["events"]["line_count"], 2)
+
     def test_cmd_health_prints_storage_diagnostics(self):
         with DeepPlanStateIsolation():
             deepplan.ensure_state()
@@ -685,6 +800,7 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertIn("Revision Count:", output)
         self.assertIn("Writable:", output)
         self.assertIn("Latest Recoverable Revision:", output)
+        self.assertIn("Events Retention:", output)
 
     def test_runtime_schema_matches_checked_in_schema(self):
         report = deepplan.schema_drift_report()
