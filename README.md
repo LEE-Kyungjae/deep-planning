@@ -306,6 +306,21 @@ Supported slash commands:
 Mutation tools now also accept an optional `expected_fingerprint` field so callers can reject stale writes without going through HTTP.
 Tool responses now include stable `ok`, `tool_name`, and `result_type` fields to simplify downstream orchestration.
 
+## Python Client
+
+This repo now includes a lightweight integration-facing client in `deepplan_client.py`.
+
+Example:
+
+```python
+from deepplan_client import DeepPlanClient
+
+client = DeepPlanClient.from_http("127.0.0.1", 8787)
+plan = client.get_plan()
+updated = client.update_plan({"goal": "Ship local agent layer"})
+preview = client.preview_restore(previous=True)
+```
+
 ## Agent Input Mapping
 
 Bundled wrapper behavior:
