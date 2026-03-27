@@ -180,6 +180,35 @@ class DeepPlanServerTests(unittest.TestCase):
         self.assertIn("revisions", payload["logs"])
         self.assertIn("recovery_candidate_available", payload)
 
+    def test_get_cycle_returns_plan_qa_health_and_history(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            update = build_handler(
+                "POST",
+                "/plan",
+                body=json.dumps(
+                    {
+                        "goal": "cycle endpoint",
+                        "success_metric": "Reach 2 pilots",
+                        "deadline": "2026-04-03",
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            update.do_POST()
+            handler = build_handler("GET", "/cycle?limit=1")
+            handler.do_GET()
+            status, payload, headers = decode_response(handler)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result_type"], "cycle")
+        self.assertEqual(payload["plan"]["goal"], "cycle endpoint")
+        self.assertIn("score", payload["qa"])
+        self.assertIn("status", payload["health"])
+        self.assertEqual(payload["history_limit"], 1)
+        self.assertEqual(len(payload["history"]), 1)
+        self.assertEqual(headers.get("ETag"), f'"{payload["fingerprint"]}"')
+
     def test_get_health_reports_retained_log_counts_after_prune(self):
         with DeepPlanStateIsolation():
             deepplan.EVENT_RETENTION_LIMIT = 2
@@ -255,6 +284,41 @@ class DeepPlanServerTests(unittest.TestCase):
         self.assertIn("metadata", payload["result"])
         self.assertIn("diff", payload["result"])
 
+    def test_restore_preview_endpoint_returns_direct_result(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            update = build_handler(
+                "POST",
+                "/plan",
+                body=json.dumps({"goal": "preview endpoint baseline"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            update.do_POST()
+            history = build_handler("GET", "/history")
+            history.do_GET()
+            _status, history_payload, _headers = decode_response(history)
+            second = build_handler(
+                "POST",
+                "/plan",
+                body=json.dumps({"goal": "preview endpoint changed"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            second.do_POST()
+            handler = build_handler(
+                "POST",
+                "/restore/preview",
+                body=json.dumps({"revision_id": history_payload["revisions"][-1]["revision_id"]}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            handler.do_POST()
+            status, payload, _headers = decode_response(handler)
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["tool_name"], "preview_restore")
+        self.assertEqual(payload["result_type"], "restore_preview")
+        self.assertIn("goal", payload["changed_fields"])
+
     def test_restore_revision_tool_wrapper_rejects_stale_fingerprint(self):
         with DeepPlanStateIsolation():
             deepplan.ensure_state()
@@ -286,6 +350,47 @@ class DeepPlanServerTests(unittest.TestCase):
                 "POST",
                 "/tools/restore_revision",
                 body=json.dumps({"input": {"revision_id": history_payload["revisions"][-1]["revision_id"]}}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "If-Match": f'"{initial_payload["fingerprint"]}"'},
+            )
+            stale_restore.do_POST()
+            status, payload, response_headers = decode_response(stale_restore)
+
+        self.assertEqual(status, 412)
+        self.assertEqual(payload["error"], "plan fingerprint mismatch")
+        self.assertIn("current_fingerprint", payload)
+        self.assertEqual(response_headers.get("ETag"), f'"{payload["current_fingerprint"]}"')
+
+    def test_restore_endpoint_rejects_stale_fingerprint(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            first_get = build_handler("GET", "/plan")
+            first_get.do_GET()
+            _status, initial_payload, initial_headers = decode_response(first_get)
+
+            first_update = build_handler(
+                "POST",
+                "/plan",
+                body=json.dumps({"goal": "first restore endpoint baseline"}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "If-Match": initial_headers["ETag"]},
+            )
+            first_update.do_POST()
+
+            history = build_handler("GET", "/history")
+            history.do_GET()
+            _status, history_payload, _headers = decode_response(history)
+
+            second_update = build_handler(
+                "POST",
+                "/plan",
+                body=json.dumps({"goal": "second restore endpoint baseline"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            second_update.do_POST()
+
+            stale_restore = build_handler(
+                "POST",
+                "/restore",
+                body=json.dumps({"revision_id": history_payload["revisions"][-1]["revision_id"]}).encode("utf-8"),
                 headers={"Content-Type": "application/json", "If-Match": f'"{initial_payload["fingerprint"]}"'},
             )
             stale_restore.do_POST()

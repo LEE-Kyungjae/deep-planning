@@ -3,18 +3,20 @@ import argparse
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from typing import Any, Dict, Optional
 
 from deepplan_agent import execute_tool, list_tools, natural_language_to_tool
-from deepplan import PlanConflictError, normalize_fingerprint
+from deepplan import PlanConflictError, cycle_snapshot, normalize_fingerprint
 
 
 class DeepPlanHandler(BaseHTTPRequestHandler):
     server_version = "DeepPlanHTTP/0.1"
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
         if path == "/health":
             result = execute_tool("get_health", {})
             status = HTTPStatus.OK if result.get("status") == "ok" else HTTPStatus.SERVICE_UNAVAILABLE if result.get("status") == "error" else HTTPStatus.OK
@@ -26,6 +28,18 @@ class DeepPlanHandler(BaseHTTPRequestHandler):
             return
         if path == "/qa":
             self._write_json(HTTPStatus.OK, execute_tool("get_qa", {}))
+            return
+        if path == "/cycle":
+            try:
+                history_limit = int(query.get("limit", ["10"])[0])
+            except ValueError:
+                self._write_error(HTTPStatus.BAD_REQUEST, "limit must be an integer")
+                return
+            if history_limit < 0:
+                self._write_error(HTTPStatus.BAD_REQUEST, "limit must be non-negative")
+                return
+            result = cycle_snapshot(history_limit=history_limit)
+            self._write_json(HTTPStatus.OK, result, extra_headers={"ETag": self._format_etag(result["fingerprint"])})
             return
         if path == "/history":
             self._write_json(HTTPStatus.OK, execute_tool("get_history", {}))
@@ -55,6 +69,14 @@ class DeepPlanHandler(BaseHTTPRequestHandler):
 
         if path == "/replan":
             self._execute_tool_json("replan", payload, expected_fingerprint)
+            return
+
+        if path == "/restore/preview":
+            self._execute_tool_json("preview_restore", payload, None)
+            return
+
+        if path == "/restore":
+            self._execute_tool_json("restore_revision", payload, expected_fingerprint)
             return
 
         if path == "/agent/act":

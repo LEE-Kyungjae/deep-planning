@@ -76,6 +76,9 @@ class DeepPlanClient:
     def get_health(self) -> Dict[str, Any]:
         return self.request("GET", "/health")
 
+    def get_cycle(self, *, history_limit: int = 10) -> Dict[str, Any]:
+        return self.request("GET", f"/cycle?limit={int(history_limit)}")
+
     def get_history(self) -> Dict[str, Any]:
         return self.request("GET", "/history")
 
@@ -100,7 +103,7 @@ class DeepPlanClient:
             payload["revision_id"] = revision_id
         if previous:
             payload["previous"] = True
-        return self.run_tool("preview_restore", payload)
+        return self.request("POST", "/restore/preview", body=payload)
 
     def restore_revision(self, *, revision_id: str = "", previous: bool = False, expected_fingerprint: str = "") -> Dict[str, Any]:
         payload: Dict[str, Any] = {}
@@ -110,4 +113,4 @@ class DeepPlanClient:
             payload["previous"] = True
         if not expected_fingerprint and self.tracked_fingerprint:
             expected_fingerprint = self.tracked_fingerprint
-        return self.run_tool("restore_revision", payload, expected_fingerprint=expected_fingerprint)
+        return self.request("POST", "/restore", body=payload, expected_fingerprint=expected_fingerprint)

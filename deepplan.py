@@ -451,6 +451,23 @@ def plan_response(plan: Dict) -> Dict:
     }
 
 
+def cycle_snapshot(history_limit: int = 10) -> Dict:
+    plan = load_plan()
+    plan_result = plan_response(plan)
+    return {
+        "ok": True,
+        "result_type": "cycle",
+        "plan": plan_result["plan"],
+        "summary": plan_result["summary"],
+        "validation": plan_result["validation"],
+        "fingerprint": plan_result["fingerprint"],
+        "qa": qa_report(plan),
+        "health": storage_health_report(),
+        "history": list_revisions(limit=history_limit),
+        "history_limit": history_limit,
+    }
+
+
 def apply_replan_payload(plan: Dict, payload: Dict) -> Dict:
     evidence_text = str(payload.get("evidence", "")).strip()
     if evidence_text:

@@ -224,6 +224,7 @@ python3 deepplan_server.py --host 127.0.0.1 --port 8787
 Available endpoints:
 
 - `GET /health`: storage health, parseability, and recovery diagnostics
+- `GET /cycle`: plan + QA + health + recent revision history in one snapshot
 - `GET /plan`: full current plan + derived summary, plus a `fingerprint` field and `ETag` header
 - `GET /qa`: QA report as JSON
 - `GET /history`: recent revision snapshots
@@ -232,6 +233,8 @@ Available endpoints:
 - `POST /plan`: update core plan fields using a JSON object and run QA with auto-replan if needed
 - `POST /evidence`: append one evidence item using JSON
 - `POST /replan`: append execution evidence or incremental plan deltas and run QA with auto-replan if needed
+- `POST /restore/preview`: preview one restore target directly without the `/tools` wrapper
+- `POST /restore`: restore one revision directly with the same `If-Match` concurrency contract as other writes
 - `POST /tools/<tool_name>`: run one tool with `{"input": {...}}`
 - `POST /agent/act`: map slash/natural-language input to a tool call
 
@@ -244,6 +247,7 @@ Write endpoints support optimistic concurrency:
 Example:
 
 ```bash
+curl http://127.0.0.1:8787/cycle?limit=5
 curl http://127.0.0.1:8787/plan
 curl http://127.0.0.1:8787/qa
 curl http://127.0.0.1:8787/health
@@ -256,6 +260,9 @@ curl -X POST http://127.0.0.1:8787/evidence \
 curl -X POST http://127.0.0.1:8787/replan \
   -H 'Content-Type: application/json' \
   -d '{"evidence":"Pilot users reported repeated friction","evidence_source":"pilot","evidence_confidence":75,"evidence_axis":"market"}'
+curl -X POST http://127.0.0.1:8787/restore/preview \
+  -H 'Content-Type: application/json' \
+  -d '{"previous":true}'
 curl -X POST http://127.0.0.1:8787/plan \
   -H 'Content-Type: application/json' \
   -H 'If-Match: "<fingerprint-from-get-plan>"' \
@@ -319,6 +326,7 @@ Example:
 from deepplan_client import DeepPlanClient
 
 client = DeepPlanClient.from_http("127.0.0.1", 8787)
+cycle = client.get_cycle(history_limit=5)
 plan = client.get_plan()
 updated = client.update_plan({"goal": "Ship local agent layer"})
 preview = client.preview_restore(previous=True)

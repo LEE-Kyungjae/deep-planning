@@ -87,6 +87,30 @@ class DeepPlanClientTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(client.tracked_fingerprint, result["fingerprint"])
 
+    def test_get_cycle_returns_integrated_snapshot_and_tracks_fingerprint(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            seed = deepplan.mutate_plan_state(
+                lambda plan: plan.update(
+                    {
+                        "goal": "client cycle",
+                        "success_metric": "Reach 2 pilots",
+                        "deadline": "2026-04-03",
+                    }
+                ),
+                revision_source="test_client_cycle",
+            )
+            client = DeepPlanClient(transport=handler_transport)
+            result = client.get_cycle(history_limit=1)
+
+        self.assertEqual(result["result_type"], "cycle")
+        self.assertEqual(result["plan"]["goal"], "client cycle")
+        self.assertIn("score", result["qa"])
+        self.assertIn("status", result["health"])
+        self.assertEqual(result["history_limit"], 1)
+        self.assertEqual(len(result["history"]), 1)
+        self.assertEqual(client.tracked_fingerprint, deepplan.plan_fingerprint(seed))
+
     def test_update_plan_uses_tracked_fingerprint(self):
         with DeepPlanStateIsolation():
             deepplan.ensure_state()
@@ -118,9 +142,9 @@ class DeepPlanClientTests(unittest.TestCase):
             preview = client.preview_restore(previous=True)
             restored = client.restore_revision(previous=True, expected_fingerprint=second["fingerprint"])
 
-        self.assertEqual(preview["result"]["selected_via"], "previous")
-        self.assertEqual(preview["result"]["metadata"]["goal"], "client previous first")
-        self.assertEqual(restored["result"]["plan"]["goal"], "client previous first")
+        self.assertEqual(preview["selected_via"], "previous")
+        self.assertEqual(preview["metadata"]["goal"], "client previous first")
+        self.assertEqual(restored["plan"]["goal"], "client previous first")
         self.assertNotEqual(first["fingerprint"], second["fingerprint"])
 
     def test_stale_fingerprint_raises_client_error(self):
