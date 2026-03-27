@@ -304,6 +304,7 @@ Supported slash commands:
 - `/deepplan.hypothesis`
 
 Mutation tools now also accept an optional `expected_fingerprint` field so callers can reject stale writes without going through HTTP.
+Tool responses now include stable `tool_name` and `result_type` fields to simplify downstream orchestration.
 
 ## Agent Input Mapping
 

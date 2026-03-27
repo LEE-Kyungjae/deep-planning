@@ -425,6 +425,13 @@ def list_tools() -> List[Dict[str, Any]]:
     return TOOL_SCHEMAS
 
 
+def enrich_tool_result(name: str, result_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    enriched = dict(payload)
+    enriched["tool_name"] = name
+    enriched["result_type"] = result_type
+    return enriched
+
+
 def tool_schema_contract_report() -> Dict[str, Any]:
     schema_names = {item["name"] for item in TOOL_SCHEMAS}
     expected_names = {
@@ -476,20 +483,20 @@ def tool_schema_contract_report() -> Dict[str, Any]:
 def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if name == "get_plan":
         plan = load_plan()
-        return plan_response(plan)
+        return enrich_tool_result(name, "plan", plan_response(plan))
 
     if name == "get_qa":
-        return qa_report(load_plan())
+        return enrich_tool_result(name, "qa", qa_report(load_plan()))
 
     if name == "get_health":
-        return storage_health_report()
+        return enrich_tool_result(name, "health", storage_health_report())
 
     if name == "get_history":
         validate_history_payload(payload)
-        return {"revisions": list_revisions(int(payload.get("limit", 10)))}
+        return enrich_tool_result(name, "history", {"revisions": list_revisions(int(payload.get("limit", 10)))})
 
     if name == "validate_plan":
-        return validate_plan_shape(load_plan())
+        return enrich_tool_result(name, "validation", validate_plan_shape(load_plan()))
 
     if name == "restore_revision":
         validate_restore_payload(payload)
@@ -514,11 +521,15 @@ def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         response = plan_response(plan)
         response["restored_revision_id"] = revision["revision_id"]
         response["qa"] = qa_report(plan)
-        return response
+        return enrich_tool_result(name, "mutation", response)
 
     if name == "preview_restore":
         validate_preview_restore_payload(payload)
-        return restore_preview(str(payload.get("revision_id", "")).strip(), previous=bool(payload.get("previous", False)))
+        return enrich_tool_result(
+            name,
+            "restore_preview",
+            restore_preview(str(payload.get("revision_id", "")).strip(), previous=bool(payload.get("previous", False))),
+        )
 
     if name == "replan":
         validate_replan_payload(payload)
@@ -529,14 +540,14 @@ def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             revision_source="replan",
             revision_reason=str(payload.get("evidence", "")).strip(),
         )
-        return {
+        return enrich_tool_result(name, "mutation", {
             "plan": result["plan"],
             "summary": plan_summary(result["plan"]),
             "validation": validate_plan_shape(result["plan"]),
             "fingerprint": plan_fingerprint(result["plan"]),
             "qa": result["qa"],
             "auto_replan": result["auto_replan"],
-        }
+        })
 
     if name == "update_plan":
         validate_update_payload(payload)
@@ -547,14 +558,14 @@ def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             revision_source="update_plan",
             revision_reason=str(payload.get("goal", "")).strip(),
         )
-        return {
+        return enrich_tool_result(name, "mutation", {
             "plan": result["plan"],
             "summary": plan_summary(result["plan"]),
             "validation": validate_plan_shape(result["plan"]),
             "fingerprint": plan_fingerprint(result["plan"]),
             "qa": result["qa"],
             "auto_replan": result["auto_replan"],
-        }
+        })
 
     if name == "add_evidence":
         validate_evidence_payload(payload)
@@ -577,7 +588,11 @@ def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             revision_source="add_evidence",
             revision_reason=claim,
         )
-        return {"plan": plan, "summary": plan_summary(plan), "validation": validate_plan_shape(plan), "fingerprint": plan_response(plan)["fingerprint"], "qa": qa_report(plan)}
+        return enrich_tool_result(
+            name,
+            "mutation",
+            {"plan": plan, "summary": plan_summary(plan), "validation": validate_plan_shape(plan), "fingerprint": plan_response(plan)["fingerprint"], "qa": qa_report(plan)},
+        )
 
     if name == "add_hypothesis":
         validate_hypothesis_payload(payload)
@@ -612,7 +627,11 @@ def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             revision_source="add_hypothesis",
             revision_reason=hypothesis,
         )
-        return {"plan": plan, "summary": plan_summary(plan), "validation": validate_plan_shape(plan), "fingerprint": plan_response(plan)["fingerprint"], "qa": qa_report(plan)}
+        return enrich_tool_result(
+            name,
+            "mutation",
+            {"plan": plan, "summary": plan_summary(plan), "validation": validate_plan_shape(plan), "fingerprint": plan_response(plan)["fingerprint"], "qa": qa_report(plan)},
+        )
 
     raise ValueError(f"unknown tool: {name}")
 

@@ -133,6 +133,8 @@ class DeepPlanRegressionTests(unittest.TestCase):
             summary = deepplan.plan_summary(result["plan"])
 
         self.assertIn("auto_replan", result)
+        self.assertEqual(result["tool_name"], "update_plan")
+        self.assertEqual(result["result_type"], "mutation")
         self.assertTrue(result["auto_replan"]["triggered"])
         self.assertEqual(result["auto_replan"]["blocked"], [])
         self.assertEqual(result["qa"]["result"], "PASS")
@@ -725,6 +727,37 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertEqual(report["missing_validators"], [])
         self.assertEqual(report["additional_properties_true"], [])
         self.assertEqual(report["mutation_tools_missing_expected_fingerprint"], [])
+
+    def test_get_plan_returns_normalized_result_fields(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            result = deepplan_agent.execute_tool("get_plan", {})
+
+        self.assertEqual(result["tool_name"], "get_plan")
+        self.assertEqual(result["result_type"], "plan")
+
+    def test_preview_restore_returns_normalized_result_fields(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            first = deepplan_agent.execute_tool(
+                "update_plan",
+                {
+                    "goal": "normalized preview first",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                },
+            )
+            deepplan_agent.execute_tool(
+                "update_plan",
+                {
+                    "goal": "normalized preview second",
+                    "expected_fingerprint": first["fingerprint"],
+                },
+            )
+            result = deepplan_agent.execute_tool("preview_restore", {"previous": True})
+
+        self.assertEqual(result["tool_name"], "preview_restore")
+        self.assertEqual(result["result_type"], "restore_preview")
 
 
 if __name__ == "__main__":
