@@ -189,6 +189,7 @@ python3 deepplan_server.py --port 8787
 - `validate`: validate plan structure and nested record types
 - `schema`: print the runtime schema, check for drift, or rewrite `schemas/plan.schema.json`
 - `health`: print storage health, parseability, and recovery diagnostics
+  - includes latest recoverable revision and whether the current plan matches it
 - `show`: print current plan summary, including the latest auto-replan signal when present
 - `history`: print recent revision snapshots
 - `restore`: restore the current plan from a recorded revision snapshot

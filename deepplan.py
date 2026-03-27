@@ -538,6 +538,12 @@ def storage_health_report() -> Dict:
     plan_error = ""
     current_fingerprint = ""
     revision_count = 0
+    latest_revision_id = ""
+    latest_revision_fingerprint = ""
+    latest_recoverable_revision_id = ""
+    latest_recoverable_revision_fingerprint = ""
+    current_matches_latest_revision = False
+    recovery_candidate_available = False
     try:
         plan = load_plan()
         plan_parseable = True
@@ -563,6 +569,20 @@ def storage_health_report() -> Dict:
     ]:
         if report["invalid_lines"]:
             issues.append(f"{label}_invalid_lines:{report['invalid_lines']}")
+
+    revisions = list_revisions(limit=1)
+    if revisions:
+        latest_revision = revisions[0]
+        latest_revision_id = str(latest_revision.get("revision_id", "")).strip()
+        latest_revision_fingerprint = str(latest_revision.get("fingerprint", "")).strip()
+        latest_recoverable_revision_id = latest_revision_id
+        latest_recoverable_revision_fingerprint = latest_revision_fingerprint
+        recovery_candidate_available = bool(latest_recoverable_revision_id)
+        current_matches_latest_revision = bool(current_fingerprint and latest_revision_fingerprint and current_fingerprint == latest_revision_fingerprint)
+        if current_fingerprint and latest_revision_fingerprint and current_fingerprint != latest_revision_fingerprint:
+            issues.append("current_plan_differs_from_latest_revision")
+    elif not plan_parseable:
+        issues.append("no_recoverable_revision_available")
 
     writable = True
     writable_error = ""
@@ -590,6 +610,12 @@ def storage_health_report() -> Dict:
         "plan_error": plan_error,
         "current_fingerprint": current_fingerprint,
         "revision_count": revision_count,
+        "latest_revision_id": latest_revision_id,
+        "latest_revision_fingerprint": latest_revision_fingerprint,
+        "latest_recoverable_revision_id": latest_recoverable_revision_id,
+        "latest_recoverable_revision_fingerprint": latest_recoverable_revision_fingerprint,
+        "current_matches_latest_revision": current_matches_latest_revision,
+        "recovery_candidate_available": recovery_candidate_available,
         "writable": writable,
         "writable_error": writable_error,
         "logs": {
@@ -1752,6 +1778,8 @@ def cmd_health(args: argparse.Namespace) -> None:
     print(f"Writable: {'yes' if report['writable'] else 'no'}")
     print(f"Revision Count: {report['revision_count']}")
     print(f"Current Fingerprint: {report['current_fingerprint'] or 'n/a'}")
+    print(f"Latest Recoverable Revision: {report['latest_recoverable_revision_id'] or 'n/a'}")
+    print(f"Current Matches Latest Revision: {'yes' if report['current_matches_latest_revision'] else 'no'}")
     if report["issues"]:
         print("Issues:")
         for issue in report["issues"]:

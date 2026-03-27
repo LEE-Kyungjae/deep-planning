@@ -171,6 +171,7 @@ class DeepPlanServerTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertIn("logs", payload)
         self.assertIn("revisions", payload["logs"])
+        self.assertIn("recovery_candidate_available", payload)
 
     def test_preview_restore_tool_wrapper_returns_diff_summary(self):
         with DeepPlanStateIsolation():

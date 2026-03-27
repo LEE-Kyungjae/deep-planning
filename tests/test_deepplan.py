@@ -573,6 +573,43 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertEqual(report["logs"]["events"]["invalid_lines"], 1)
         self.assertTrue(any(issue.startswith("events_invalid_lines:1") for issue in report["issues"]))
 
+    def test_storage_health_report_tracks_latest_recoverable_revision(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            result = deepplan_agent.execute_tool(
+                "update_plan",
+                {
+                    "goal": "health revision test",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                },
+            )
+            report = deepplan.storage_health_report()
+
+        self.assertTrue(report["recovery_candidate_available"])
+        self.assertTrue(report["latest_recoverable_revision_id"])
+        self.assertEqual(report["latest_recoverable_revision_fingerprint"], result["fingerprint"])
+        self.assertTrue(report["current_matches_latest_revision"])
+
+    def test_storage_health_report_flags_divergence_from_latest_revision(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            deepplan_agent.execute_tool(
+                "update_plan",
+                {
+                    "goal": "divergence baseline",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                },
+            )
+            plan = deepplan.load_plan()
+            plan["goal"] = "manual divergence"
+            deepplan.save_validated_plan(plan)
+            report = deepplan.storage_health_report()
+
+        self.assertFalse(report["current_matches_latest_revision"])
+        self.assertIn("current_plan_differs_from_latest_revision", report["issues"])
+
     def test_cmd_health_prints_storage_diagnostics(self):
         with DeepPlanStateIsolation():
             deepplan.ensure_state()
@@ -584,6 +621,7 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertIn("Status:", output)
         self.assertIn("Revision Count:", output)
         self.assertIn("Writable:", output)
+        self.assertIn("Latest Recoverable Revision:", output)
 
     def test_runtime_schema_matches_checked_in_schema(self):
         report = deepplan.schema_drift_report()
