@@ -18,6 +18,7 @@ from deepplan import (
     plan_summary,
     qa_autoreplan_result,
     qa_report,
+    restore_preview,
     save_validated_plan,
     storage_health_report,
     validate_plan_shape,
@@ -94,6 +95,18 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "properties": {
                 "revision_id": {"type": "string"},
                 "expected_fingerprint": {"type": "string"},
+            },
+            "required": ["revision_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "preview_restore",
+        "description": "Preview the diff and summary impact of restoring a recorded revision snapshot.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "revision_id": {"type": "string"},
             },
             "required": ["revision_id"],
             "additionalProperties": False,
@@ -287,6 +300,17 @@ def validate_restore_payload(payload: Dict[str, Any]) -> None:
         raise ValueError("revision_id is required")
 
 
+def validate_preview_restore_payload(payload: Dict[str, Any]) -> None:
+    ensure_object_payload(payload)
+    allowed = {"revision_id"}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ValueError(f"unknown preview_restore fields: {', '.join(unknown)}")
+    revision_id = payload.get("revision_id", "")
+    if not isinstance(revision_id, str) or not revision_id.strip():
+        raise ValueError("revision_id is required")
+
+
 def validate_evidence_payload(payload: Dict[str, Any]) -> None:
     ensure_object_payload(payload)
     validate_expected_fingerprint(payload)
@@ -400,6 +424,14 @@ def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
                 current_plan.clear(),
                 current_plan.update(json.loads(json.dumps(revision["plan"]))),
             ),
+            event_payloads=[
+                {
+                    "ts": now_iso(),
+                    "type": "plan_restored",
+                    "source": "restore_revision",
+                    "revision_id": revision["revision_id"],
+                }
+            ],
             expected_fingerprint=payload.get("expected_fingerprint"),
             revision_source="restore_revision",
             revision_reason=f"restore:{revision['revision_id']}",
@@ -408,6 +440,10 @@ def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         response["restored_revision_id"] = revision["revision_id"]
         response["qa"] = qa_report(plan)
         return response
+
+    if name == "preview_restore":
+        validate_preview_restore_payload(payload)
+        return restore_preview(str(payload.get("revision_id", "")).strip())
 
     if name == "replan":
         validate_replan_payload(payload)
@@ -540,6 +576,7 @@ def slash_to_tool(command: str) -> Tuple[str, Dict[str, Any]]:
         "/deepplan.show": "get_plan",
         "/deepplan.history": "get_history",
         "/deepplan.restore": "restore_revision",
+        "/deepplan.restore-preview": "preview_restore",
         "/deepplan.health": "get_health",
         "/deepplan.qa": "get_qa",
         "/deepplan.validate": "validate_plan",
@@ -561,6 +598,8 @@ def natural_language_to_tool(text: str) -> Tuple[str, Dict[str, Any]]:
         return "get_qa", {}
     if any(phrase in lowered for phrase in ["health", "status health", "storage health"]):
         return "get_health", {}
+    if lowered.startswith("preview restore "):
+        return "preview_restore", parse_assignment_tokens(shlex.split(stripped[len("preview restore ") :]))
     if any(phrase in lowered for phrase in ["history", "revision history", "plan history"]):
         return "get_history", {}
     if any(phrase in lowered for phrase in ["validate plan", "plan validation", "check plan structure"]):

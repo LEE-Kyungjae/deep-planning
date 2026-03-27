@@ -171,6 +171,39 @@ class DeepPlanServerTests(unittest.TestCase):
         self.assertIn("logs", payload)
         self.assertIn("revisions", payload["logs"])
 
+    def test_preview_restore_tool_wrapper_returns_diff_summary(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            update = build_handler(
+                "POST",
+                "/plan",
+                body=json.dumps({"goal": "preview baseline"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            update.do_POST()
+            history = build_handler("GET", "/history")
+            history.do_GET()
+            _status, history_payload, _headers = decode_response(history)
+            second = build_handler(
+                "POST",
+                "/plan",
+                body=json.dumps({"goal": "preview changed"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            second.do_POST()
+            handler = build_handler(
+                "POST",
+                "/tools/preview_restore",
+                body=json.dumps({"input": {"revision_id": history_payload["revisions"][-1]["revision_id"]}}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            handler.do_POST()
+            status, payload, _headers = decode_response(handler)
+
+        self.assertEqual(status, 200)
+        self.assertIn("changed_fields", payload["result"])
+        self.assertIn("goal", payload["result"]["changed_fields"])
+
 
 if __name__ == "__main__":
     unittest.main()

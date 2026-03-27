@@ -191,6 +191,7 @@ python3 deepplan_server.py --port 8787
 - `show`: print current plan summary, including the latest auto-replan signal when present
 - `history`: print recent revision snapshots
 - `restore`: restore the current plan from a recorded revision snapshot
+  - `restore --preview`: preview changed fields and summary impact before mutation
 - `ideate`: generate plan ideas from lightweight user context and optionally apply one
 - `insight`: generate viewpoint-expansion insight pack and optionally apply it
 - `review`: run cycle-based planning review with recommendations and next questions
@@ -255,6 +256,9 @@ curl -X POST http://127.0.0.1:8787/plan \
 curl -X POST http://127.0.0.1:8787/tools/add_hypothesis \
   -H 'Content-Type: application/json' \
   -d '{"input":{"hypothesis":"Narrow segment returns weekly","metric":"weekly-active-pilot-users","target":">=20","window":"14 days"}}'
+curl -X POST http://127.0.0.1:8787/tools/preview_restore \
+  -H 'Content-Type: application/json' \
+  -d '{"input":{"revision_id":"<revision-id>"}}'
 curl -X POST http://127.0.0.1:8787/agent/act \
   -H 'Content-Type: application/json' \
   -d '{"input":"/deepplan.evidence claim=\"Repeated pain in interviews\" source=interviews confidence=75 axis=market"}'
@@ -268,6 +272,7 @@ DeepPlan now includes a local wrapper for slash-style and lightweight natural-la
 python3 deepplan_agent.py tools
 python3 deepplan_agent.py run --input '/deepplan.show'
 python3 deepplan_agent.py run --input '/deepplan.health'
+python3 deepplan_agent.py run --input '/deepplan.restore-preview revision_id=<revision-id>'
 python3 deepplan_agent.py run --input '/deepplan.plan goal="Ship local agent layer" planning_horizon="4 weeks" review_cadence=weekly'
 python3 deepplan_agent.py run --input '/deepplan.replan evidence="Pilot retention improved" evidence_confidence=70 evidence_axis=market'
 python3 deepplan_agent.py run --input '/deepplan.history'
@@ -285,6 +290,7 @@ Supported slash commands:
 - `/deepplan.health`
 - `/deepplan.history`
 - `/deepplan.restore`
+- `/deepplan.restore-preview`
 - `/deepplan.qa`
 - `/deepplan.validate`
 - `/deepplan.evidence`
@@ -301,6 +307,7 @@ Bundled wrapper behavior:
 - `/deepplan.health` -> `get_health`
 - `/deepplan.history` -> `get_history`
 - `/deepplan.restore` -> `restore_revision`
+- `/deepplan.restore-preview` -> `preview_restore`
 - `/deepplan.qa` -> `get_qa`
 - `/deepplan.validate` -> `validate_plan`
 - `/deepplan.evidence` -> `add_evidence`

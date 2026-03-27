@@ -546,6 +546,36 @@ def get_revision(revision_id: str) -> Dict:
     raise ValueError(f"unknown revision_id: {wanted}")
 
 
+def diff_plan_fields(current_plan: Dict, target_plan: Dict) -> List[str]:
+    keys = sorted(set(current_plan) | set(target_plan))
+    changed: List[str] = []
+    for key in keys:
+        if current_plan.get(key) != target_plan.get(key):
+            changed.append(key)
+    return changed
+
+
+def restore_preview(revision_id: str) -> Dict:
+    current_plan = load_plan()
+    revision = get_revision(revision_id)
+    target_plan = json.loads(json.dumps(revision["plan"]))
+    current_fingerprint = plan_fingerprint(current_plan)
+    target_fingerprint = plan_fingerprint(target_plan)
+    changed_fields = diff_plan_fields(current_plan, target_plan)
+    return {
+        "revision_id": revision["revision_id"],
+        "source": revision.get("source", ""),
+        "reason": revision.get("reason", ""),
+        "current_fingerprint": current_fingerprint,
+        "target_fingerprint": target_fingerprint,
+        "changed_fields": changed_fields,
+        "change_count": len(changed_fields),
+        "no_op": current_fingerprint == target_fingerprint,
+        "current_summary": plan_summary(current_plan),
+        "target_summary": plan_summary(target_plan),
+    }
+
+
 def last_auto_replan_event(plan: Optional[Dict] = None) -> Optional[Dict]:
     current_updated_at = str(plan.get("updated_at", "")).strip() if isinstance(plan, dict) else ""
     current_fingerprint = plan_fingerprint(plan) if isinstance(plan, dict) else ""
@@ -1666,6 +1696,23 @@ def cmd_history(args: argparse.Namespace) -> None:
 
 
 def cmd_restore(args: argparse.Namespace) -> None:
+    if getattr(args, "preview", False):
+        preview = restore_preview(args.revision_id)
+        if getattr(args, "json", False):
+            print(json.dumps(preview, indent=2, ensure_ascii=False))
+            return
+        print(f"Revision: {preview['revision_id']}")
+        print(f"Source: {preview['source']}")
+        if preview["reason"]:
+            print(f"Reason: {preview['reason']}")
+        print(f"No-op: {'yes' if preview['no_op'] else 'no'}")
+        print(f"Change Count: {preview['change_count']}")
+        if preview["changed_fields"]:
+            print("Changed Fields:")
+            for field in preview["changed_fields"]:
+                print(f"- {field}")
+        return
+
     revision = get_revision(args.revision_id)
     restored = mutate_plan_state(
         lambda plan: (plan.clear(), plan.update(json.loads(json.dumps(revision["plan"])))),
@@ -2076,6 +2123,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("restore")
     s.add_argument("--revision-id", type=str, required=True)
     s.add_argument("--expected-fingerprint", type=str, default="")
+    s.add_argument("--preview", action="store_true")
+    s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_restore)
 
     s = sub.add_parser("ideate")

@@ -480,6 +480,68 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertIn(revisions[0]["revision_id"], history_stdout.getvalue())
         self.assertIn("Restored revision", restore_stdout.getvalue())
 
+    def test_preview_restore_reports_changed_fields_without_mutation(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            first = deepplan_agent.execute_tool(
+                "update_plan",
+                {
+                    "goal": "preview first goal",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                },
+            )
+            second = deepplan_agent.execute_tool(
+                "update_plan",
+                {
+                    "goal": "preview second goal",
+                    "expected_fingerprint": first["fingerprint"],
+                },
+            )
+            history = deepplan_agent.execute_tool("get_history", {"limit": 10})
+            preview = deepplan_agent.execute_tool(
+                "preview_restore",
+                {
+                    "revision_id": history["revisions"][-1]["revision_id"],
+                },
+            )
+            current_plan = deepplan.load_plan()
+
+        self.assertFalse(preview["no_op"])
+        self.assertIn("goal", preview["changed_fields"])
+        self.assertEqual(current_plan["goal"], "preview second goal")
+        self.assertEqual(preview["current_fingerprint"], second["fingerprint"])
+
+    def test_restore_revision_tool_emits_plan_restored_event(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            first = deepplan_agent.execute_tool(
+                "update_plan",
+                {
+                    "goal": "restore source goal",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                },
+            )
+            second = deepplan_agent.execute_tool(
+                "update_plan",
+                {
+                    "goal": "restore target goal",
+                    "expected_fingerprint": first["fingerprint"],
+                },
+            )
+            history = deepplan_agent.execute_tool("get_history", {"limit": 10})
+            deepplan_agent.execute_tool(
+                "restore_revision",
+                {
+                    "revision_id": history["revisions"][-1]["revision_id"],
+                    "expected_fingerprint": second["fingerprint"],
+                },
+            )
+            events = [json.loads(line) for line in deepplan.EVENTS_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+        self.assertTrue(any(event.get("type") == "plan_restored" and event.get("source") == "restore_revision" for event in events))
+
     def test_storage_health_report_detects_invalid_event_lines(self):
         with DeepPlanStateIsolation():
             deepplan.ensure_state()
