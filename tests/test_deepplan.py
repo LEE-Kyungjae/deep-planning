@@ -133,6 +133,7 @@ class DeepPlanRegressionTests(unittest.TestCase):
             summary = deepplan.plan_summary(result["plan"])
 
         self.assertIn("auto_replan", result)
+        self.assertTrue(result["ok"])
         self.assertEqual(result["tool_name"], "update_plan")
         self.assertEqual(result["result_type"], "mutation")
         self.assertTrue(result["auto_replan"]["triggered"])
@@ -733,6 +734,7 @@ class DeepPlanRegressionTests(unittest.TestCase):
             deepplan.ensure_state()
             result = deepplan_agent.execute_tool("get_plan", {})
 
+        self.assertTrue(result["ok"])
         self.assertEqual(result["tool_name"], "get_plan")
         self.assertEqual(result["result_type"], "plan")
 
@@ -756,6 +758,7 @@ class DeepPlanRegressionTests(unittest.TestCase):
             )
             result = deepplan_agent.execute_tool("preview_restore", {"previous": True})
 
+        self.assertTrue(result["ok"])
         self.assertEqual(result["tool_name"], "preview_restore")
         self.assertEqual(result["result_type"], "restore_preview")
 

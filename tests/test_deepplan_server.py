@@ -168,6 +168,7 @@ class DeepPlanServerTests(unittest.TestCase):
             status, payload, _headers = decode_response(handler)
 
         self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
         self.assertEqual(payload["tool_name"], "get_health")
         self.assertEqual(payload["result_type"], "health")
         self.assertEqual(payload["status"], "ok")
@@ -205,6 +206,7 @@ class DeepPlanServerTests(unittest.TestCase):
             status, payload, _headers = decode_response(handler)
 
         self.assertEqual(status, 200)
+        self.assertTrue(payload["result"]["ok"])
         self.assertEqual(payload["result"]["tool_name"], "preview_restore")
         self.assertEqual(payload["result"]["result_type"], "restore_preview")
         self.assertIn("changed_fields", payload["result"])

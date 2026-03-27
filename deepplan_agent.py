@@ -427,6 +427,7 @@ def list_tools() -> List[Dict[str, Any]]:
 
 def enrich_tool_result(name: str, result_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     enriched = dict(payload)
+    enriched["ok"] = True
     enriched["tool_name"] = name
     enriched["result_type"] = result_type
     return enriched
