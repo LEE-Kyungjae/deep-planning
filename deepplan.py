@@ -2,14 +2,13 @@
 import argparse
 import hashlib
 import json
-import os
 import re
-import tempfile
-import threading
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from deepplan_store import FilePlanStore, PlanConflictError
 
 
 ROOT = Path(__file__).resolve().parent
@@ -19,13 +18,7 @@ DECISIONS_PATH = STATE_DIR / "decisions.jsonl"
 RISKS_PATH = STATE_DIR / "risks.jsonl"
 EVENTS_PATH = STATE_DIR / "events.jsonl"
 REVISIONS_PATH = STATE_DIR / "revisions.jsonl"
-STATE_LOCK = threading.RLock()
-
-
-class PlanConflictError(ValueError):
-    def __init__(self, current_fingerprint: str) -> None:
-        super().__init__("plan fingerprint mismatch")
-        self.current_fingerprint = current_fingerprint
+STATE_LOCK = None
 
 
 def now_iso() -> str:
@@ -33,12 +26,8 @@ def now_iso() -> str:
 
 
 def ensure_state() -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    for p in [DECISIONS_PATH, RISKS_PATH, EVENTS_PATH, REVISIONS_PATH]:
-        if not p.exists():
-            p.write_text("", encoding="utf-8")
-    if not PLAN_PATH.exists():
-        PLAN_PATH.write_text(json.dumps(default_plan(), indent=2), encoding="utf-8")
+    _sync_store_paths()
+    STORE.ensure_state()
 
 
 def default_plan() -> Dict:
@@ -123,40 +112,23 @@ def migrate_plan(plan: Dict) -> Dict:
 
 
 def _load_plan_unlocked() -> Dict:
-    ensure_state()
-    original_plan = json.loads(PLAN_PATH.read_text(encoding="utf-8"))
-    plan = migrate_plan(json.loads(json.dumps(original_plan)))
-    return plan
+    _sync_store_paths()
+    return STORE.load_plan_unlocked()
 
 
 def load_plan() -> Dict:
-    with STATE_LOCK:
-        return _load_plan_unlocked()
-
-
-def atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = None
-    try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
-            tmp.write(text)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-            temp_path = Path(tmp.name)
-        os.replace(temp_path, path)
-    finally:
-        if temp_path and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
+    _sync_store_paths()
+    return STORE.load_plan()
 
 
 def _save_plan_unlocked(plan: Dict) -> None:
-    plan["updated_at"] = now_iso()
-    atomic_write_text(PLAN_PATH, json.dumps(plan, indent=2, ensure_ascii=False))
+    _sync_store_paths()
+    STORE.save_plan_unlocked(plan)
 
 
 def save_plan(plan: Dict) -> None:
-    with STATE_LOCK:
-        _save_plan_unlocked(plan)
+    _sync_store_paths()
+    STORE.save_plan(plan)
 
 
 def validate_risk_item(item, index: int) -> List[str]:
@@ -294,6 +266,33 @@ def normalize_fingerprint(value: Optional[str]) -> str:
     return text.strip()
 
 
+STORE = FilePlanStore(
+    state_dir=STATE_DIR,
+    plan_path=PLAN_PATH,
+    decisions_path=DECISIONS_PATH,
+    risks_path=RISKS_PATH,
+    events_path=EVENTS_PATH,
+    revisions_path=REVISIONS_PATH,
+    default_plan_factory=default_plan,
+    migrate_plan=migrate_plan,
+    now_iso=now_iso,
+    plan_fingerprint=plan_fingerprint,
+    normalize_fingerprint=normalize_fingerprint,
+    ensure_valid_plan=ensure_valid_plan,
+    qa_autoreplan_result=lambda *args, **kwargs: qa_autoreplan_result(*args, **kwargs),
+)
+STATE_LOCK = STORE.lock
+
+
+def _sync_store_paths() -> None:
+    STORE.state_dir = STATE_DIR
+    STORE.plan_path = PLAN_PATH
+    STORE.decisions_path = DECISIONS_PATH
+    STORE.risks_path = RISKS_PATH
+    STORE.events_path = EVENTS_PATH
+    STORE.revisions_path = REVISIONS_PATH
+
+
 def plan_response(plan: Dict) -> Dict:
     return {
         "plan": plan,
@@ -338,41 +337,28 @@ def apply_replan_payload(plan: Dict, payload: Dict) -> Dict:
 
 
 def _append_jsonl_unlocked(path: Path, payload: Dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
+    _sync_store_paths()
+    STORE.append_jsonl_unlocked(path, payload)
 
 
 def append_jsonl(path: Path, payload: Dict) -> None:
-    with STATE_LOCK:
-        _append_jsonl_unlocked(path, payload)
+    _sync_store_paths()
+    STORE.append_jsonl(path, payload)
 
 
 def make_revision_entry(plan: Dict, source: str, reason: str = "", previous_fingerprint: str = "") -> Dict:
-    fingerprint = plan_fingerprint(plan)
-    ts = now_iso()
-    return {
-        "revision_id": f"{ts}_{fingerprint[:12]}",
-        "ts": ts,
-        "source": source,
-        "reason": reason,
-        "fingerprint": fingerprint,
-        "previous_fingerprint": previous_fingerprint,
-        "plan": json.loads(json.dumps(plan)),
-    }
+    _sync_store_paths()
+    return STORE.make_revision_entry(plan, source, reason=reason, previous_fingerprint=previous_fingerprint)
 
 
 def _append_revision_unlocked(plan: Dict, source: str, reason: str = "", previous_fingerprint: str = "") -> Dict:
-    entry = make_revision_entry(plan, source, reason=reason, previous_fingerprint=previous_fingerprint)
-    _append_jsonl_unlocked(REVISIONS_PATH, entry)
-    return entry
+    _sync_store_paths()
+    return STORE.append_revision_unlocked(plan, source, reason=reason, previous_fingerprint=previous_fingerprint)
 
 
 def append_revision(plan: Dict, source: str, reason: str = "", previous_fingerprint: str = "") -> Dict:
-    with STATE_LOCK:
-        return _append_revision_unlocked(plan, source, reason=reason, previous_fingerprint=previous_fingerprint)
+    _sync_store_paths()
+    return STORE.append_revision(plan, source, reason=reason, previous_fingerprint=previous_fingerprint)
 
 
 def mutate_plan_state(
@@ -383,77 +369,25 @@ def mutate_plan_state(
     revision_source: str = "mutate_plan_state",
     revision_reason: str = "",
 ):
-    with STATE_LOCK:
-        plan = _load_plan_unlocked()
-        current_fingerprint = plan_fingerprint(plan)
-        normalized_expected = normalize_fingerprint(expected_fingerprint)
-        if normalized_expected and normalized_expected != current_fingerprint:
-            raise PlanConflictError(current_fingerprint)
-        mutate_fn(plan)
-        _save_validated_plan_unlocked(plan)
-        revision_entry = _append_revision_unlocked(plan, revision_source, reason=revision_reason, previous_fingerprint=current_fingerprint)
-        for payload in event_payloads or []:
-            _append_jsonl_unlocked(EVENTS_PATH, payload)
-        if include_autoreplan:
-            return qa_autoreplan_result(plan, base_revision_entry=revision_entry)
-        return plan
+    _sync_store_paths()
+    return STORE.mutate_plan_state(
+        mutate_fn,
+        event_payloads=event_payloads,
+        include_autoreplan=include_autoreplan,
+        expected_fingerprint=expected_fingerprint,
+        revision_source=revision_source,
+        revision_reason=revision_reason,
+    )
 
 
 def read_jsonl(path: Path) -> List[Dict]:
-    if not path.exists():
-        return []
-    items: List[Dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        text = line.strip()
-        if not text:
-            continue
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            items.append(payload)
-    return items
+    _sync_store_paths()
+    return STORE.read_jsonl(path)
 
 
 def jsonl_health(path: Path) -> Dict:
-    if not path.exists():
-        return {
-            "path": str(path),
-            "exists": False,
-            "line_count": 0,
-            "valid_objects": 0,
-            "invalid_lines": 0,
-            "last_error": "",
-        }
-    line_count = 0
-    valid_objects = 0
-    invalid_lines = 0
-    last_error = ""
-    for line in path.read_text(encoding="utf-8").splitlines():
-        text = line.strip()
-        if not text:
-            continue
-        line_count += 1
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError as exc:
-            invalid_lines += 1
-            last_error = str(exc)
-            continue
-        if isinstance(payload, dict):
-            valid_objects += 1
-        else:
-            invalid_lines += 1
-            last_error = "line is not a JSON object"
-    return {
-        "path": str(path),
-        "exists": True,
-        "line_count": line_count,
-        "valid_objects": valid_objects,
-        "invalid_lines": invalid_lines,
-        "last_error": last_error,
-    }
+    _sync_store_paths()
+    return STORE.jsonl_health(path)
 
 
 def storage_health_report() -> Dict:
