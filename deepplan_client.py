@@ -239,6 +239,43 @@ class DeepPlanClient:
             step_results={operation: mutation_result},
         )
 
+    def apply_and_get_cycle_with_retry(
+        self,
+        operation: str,
+        payload: Dict[str, Any],
+        *,
+        history_limit: int = 10,
+        expected_fingerprint: str = "",
+    ) -> Dict[str, Any]:
+        attempt = 1
+        try:
+            result = self.apply_and_get_cycle(
+                operation,
+                payload,
+                history_limit=history_limit,
+                expected_fingerprint=expected_fingerprint,
+            )
+            result["retried"] = False
+            result["attempts"] = attempt
+            return result
+        except DeepPlanConflictError as exc:
+            if not exc.can_refresh:
+                raise
+            refreshed = self.get_cycle(history_limit=history_limit)
+            attempt += 1
+            retry_fingerprint = str(refreshed.get("fingerprint", "")).strip() or exc.current_fingerprint
+            result = self.apply_and_get_cycle(
+                operation,
+                payload,
+                history_limit=history_limit,
+                expected_fingerprint=retry_fingerprint,
+            )
+            result["retried"] = True
+            result["attempts"] = attempt
+            result["retry_from_fingerprint"] = exc.expected_fingerprint
+            result["retry_to_fingerprint"] = retry_fingerprint
+            return result
+
     def capture_evidence_cycle(
         self,
         evidence_payload: Dict[str, Any],

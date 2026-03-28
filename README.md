@@ -334,6 +334,11 @@ wrapped = client.apply_and_get_cycle(
     {"goal": "Ship local agent layer", "success_metric": "Reach 2 pilots", "deadline": "2026-04-03"},
     history_limit=3,
 )
+retried = client.apply_and_get_cycle_with_retry(
+    "update_plan",
+    {"goal": "Ship local agent layer"},
+    expected_fingerprint="stale-fingerprint",
+)
 cycle_result = client.capture_evidence_cycle(
     {"claim": "Pilot friction repeated", "source": "pilot-call", "confidence": 74, "axis": "market"},
     replan_payload={"plan_task": "Tighten onboarding loop"},

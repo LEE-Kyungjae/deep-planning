@@ -262,6 +262,45 @@ class DeepPlanClientTests(unittest.TestCase):
         self.assertEqual(ctx.exception.expected_fingerprint, initial["fingerprint"])
         self.assertTrue(ctx.exception.current_fingerprint)
 
+    def test_apply_and_get_cycle_with_retry_recovers_from_stale_fingerprint_once(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            client = DeepPlanClient(transport=handler_transport)
+            initial = client.get_plan()
+            client.update_plan(
+                {
+                    "goal": "retry baseline",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                }
+            )
+            result = client.apply_and_get_cycle_with_retry(
+                "update_plan",
+                {"goal": "retry recovered"},
+                expected_fingerprint=initial["fingerprint"],
+                history_limit=1,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["retried"])
+        self.assertEqual(result["attempts"], 2)
+        self.assertEqual(result["operation"], "update_plan")
+        self.assertEqual(result["post_cycle"]["plan"]["goal"], "retry recovered")
+        self.assertEqual(result["retry_from_fingerprint"], initial["fingerprint"])
+        self.assertTrue(result["retry_to_fingerprint"])
+        self.assertEqual(client.tracked_fingerprint, result["post_fingerprint"])
+
+    def test_apply_and_get_cycle_with_retry_does_not_retry_validation_error(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            client = DeepPlanClient(transport=handler_transport)
+            with self.assertRaises(DeepPlanClientOperationError) as ctx:
+                client.apply_and_get_cycle_with_retry("add_evidence", {"claim": " "})
+
+        self.assertEqual(ctx.exception.operation, "add_evidence")
+        self.assertEqual(ctx.exception.step, "mutation")
+        self.assertEqual(ctx.exception.status, 400)
+
 
 if __name__ == "__main__":
     unittest.main()
