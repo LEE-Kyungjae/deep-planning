@@ -14,6 +14,39 @@ class DeepPlanClientError(RuntimeError):
         self.headers = headers
 
 
+class DeepPlanConflictError(DeepPlanClientError):
+    def __init__(
+        self,
+        status: int,
+        payload: Dict[str, Any],
+        headers: Dict[str, str],
+        *,
+        expected_fingerprint: str = "",
+        current_fingerprint: str = "",
+        operation: str = "",
+        step: str = "",
+        can_refresh: bool = True,
+    ) -> None:
+        super().__init__(status, payload, headers)
+        self.expected_fingerprint = expected_fingerprint
+        self.current_fingerprint = current_fingerprint
+        self.operation = operation
+        self.step = step
+        self.can_refresh = can_refresh
+
+    def with_context(self, operation: str, step: str) -> "DeepPlanConflictError":
+        return DeepPlanConflictError(
+            self.status,
+            self.payload,
+            self.headers,
+            expected_fingerprint=self.expected_fingerprint,
+            current_fingerprint=self.current_fingerprint,
+            operation=operation,
+            step=step,
+            can_refresh=self.can_refresh,
+        )
+
+
 class DeepPlanClientOperationError(RuntimeError):
     def __init__(self, operation: str, step: str, cause: DeepPlanClientError) -> None:
         super().__init__(f"{operation} failed during {step}: {cause}")
@@ -83,6 +116,19 @@ class DeepPlanClient:
         elif isinstance(payload, dict) and isinstance(payload.get("fingerprint"), str):
             self.tracked_fingerprint = payload["fingerprint"]
         if status >= 400:
+            current_fingerprint = ""
+            if isinstance(payload, dict):
+                current_fingerprint = str(payload.get("current_fingerprint", "")).strip()
+            if not current_fingerprint and etag.startswith('"') and etag.endswith('"') and len(etag) >= 2:
+                current_fingerprint = etag[1:-1]
+            if status == 412 and isinstance(payload, dict) and str(payload.get("error", "")).strip() == "plan fingerprint mismatch":
+                raise DeepPlanConflictError(
+                    status,
+                    payload,
+                    response_headers,
+                    expected_fingerprint=fingerprint,
+                    current_fingerprint=current_fingerprint,
+                )
             raise DeepPlanClientError(status, payload, response_headers)
         return payload
 
@@ -165,6 +211,7 @@ class DeepPlanClient:
         payload: Dict[str, Any],
         *,
         history_limit: int = 10,
+        expected_fingerprint: str = "",
     ) -> Dict[str, Any]:
         mutation_map = {
             "update_plan": self.update_plan,
@@ -175,7 +222,9 @@ class DeepPlanClient:
             raise ValueError(f"unsupported operation: {operation}")
         before = self.get_cycle(history_limit=history_limit)
         try:
-            mutation_result = mutation_map[operation](payload)
+            mutation_result = mutation_map[operation](payload, expected_fingerprint=expected_fingerprint)
+        except DeepPlanConflictError as exc:
+            raise exc.with_context(operation, "mutation") from exc
         except DeepPlanClientError as exc:
             raise DeepPlanClientOperationError(operation, "mutation", exc) from exc
         try:
@@ -200,6 +249,8 @@ class DeepPlanClient:
         before = self.get_cycle(history_limit=history_limit)
         try:
             evidence_result = self.add_evidence(evidence_payload)
+        except DeepPlanConflictError as exc:
+            raise exc.with_context("capture_evidence_cycle", "add_evidence") from exc
         except DeepPlanClientError as exc:
             raise DeepPlanClientOperationError("capture_evidence_cycle", "add_evidence", exc) from exc
         replan_input = dict(replan_payload or {})
@@ -220,6 +271,8 @@ class DeepPlanClient:
             replan_input["evidence_date"] = date
         try:
             replan_result = self.replan(replan_input)
+        except DeepPlanConflictError as exc:
+            raise exc.with_context("capture_evidence_cycle", "replan") from exc
         except DeepPlanClientError as exc:
             raise DeepPlanClientOperationError("capture_evidence_cycle", "replan", exc) from exc
         try:

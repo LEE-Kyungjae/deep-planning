@@ -341,6 +341,8 @@ cycle_result = client.capture_evidence_cycle(
 preview = client.preview_restore(previous=True)
 ```
 
+High-level client wrappers now raise `DeepPlanConflictError` for stale fingerprint conflicts and `DeepPlanClientOperationError` for step-scoped multi-call failures.
+
 ## Agent Input Mapping
 
 Bundled wrapper behavior:

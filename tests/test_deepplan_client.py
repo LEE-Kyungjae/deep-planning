@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 import deepplan
-from deepplan_client import DeepPlanClient, DeepPlanClientError, DeepPlanClientOperationError
+from deepplan_client import DeepPlanClient, DeepPlanClientError, DeepPlanClientOperationError, DeepPlanConflictError
 from deepplan_server import DeepPlanHandler
 
 
@@ -216,7 +216,7 @@ class DeepPlanClientTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status, 400)
         self.assertEqual(ctx.exception.payload["error"], "claim is required")
 
-    def test_stale_fingerprint_raises_client_error(self):
+    def test_stale_fingerprint_raises_typed_conflict_error(self):
         with DeepPlanStateIsolation():
             deepplan.ensure_state()
             client = DeepPlanClient(transport=handler_transport)
@@ -228,11 +228,39 @@ class DeepPlanClientTests(unittest.TestCase):
                     "deadline": "2026-04-03",
                 }
             )
-            with self.assertRaises(DeepPlanClientError) as ctx:
+            with self.assertRaises(DeepPlanConflictError) as ctx:
                 client.update_plan({"goal": "stale write"}, expected_fingerprint=first["fingerprint"])
 
         self.assertEqual(ctx.exception.status, 412)
         self.assertEqual(ctx.exception.payload["error"], "plan fingerprint mismatch")
+        self.assertEqual(ctx.exception.expected_fingerprint, first["fingerprint"])
+        self.assertTrue(ctx.exception.current_fingerprint)
+        self.assertTrue(ctx.exception.can_refresh)
+
+    def test_apply_and_get_cycle_surfaces_typed_conflict_error_with_operation_context(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            client = DeepPlanClient(transport=handler_transport)
+            initial = client.get_plan()
+            client.update_plan(
+                {
+                    "goal": "conflict baseline",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                }
+            )
+            with self.assertRaises(DeepPlanConflictError) as ctx:
+                client.apply_and_get_cycle(
+                    "update_plan",
+                    {"goal": "stale wrapped update"},
+                    expected_fingerprint=initial["fingerprint"],
+                )
+
+        self.assertEqual(ctx.exception.operation, "update_plan")
+        self.assertEqual(ctx.exception.step, "mutation")
+        self.assertEqual(ctx.exception.status, 412)
+        self.assertEqual(ctx.exception.expected_fingerprint, initial["fingerprint"])
+        self.assertTrue(ctx.exception.current_fingerprint)
 
 
 if __name__ == "__main__":
