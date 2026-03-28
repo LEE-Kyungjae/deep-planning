@@ -1,112 +1,52 @@
-# DeepPlan (MVP)
+# DeepPlan
 
-DeepPlan is a local, agent-friendly **Plan Intelligence** engine.
-It focuses on one thing: making planning quality the core value.
+DeepPlan is a local, agent-friendly planning kernel.
 
-## Why DeepPlan
-
-Most AI products are excellent at `task -> implement`.
-DeepPlan intentionally focuses on the only layer before that:
+It is built for the layer before execution:
 
 - what to build
 - why now
-- what not to build
-- how to detect failure early
+- what evidence supports the plan
+- what would invalidate it
+- when to replan
 
-`Plan` is not prompt preparation.
-`Plan` is the business and product decision layer.
-DeepPlan is `Plan-only` by design.
+DeepPlan is intentionally not an execution orchestrator. It is the planning and decision layer that other tools, agents, and runtimes can build on top of.
 
-## Product Thesis
+## What DeepPlan Is
 
-In the AI era, execution is increasingly commoditized.
-Direction quality is not.
+DeepPlan now has four access layers around the same planning core:
 
-If planning is weak, faster execution only accelerates the wrong path.
-DeepPlan exists to reduce that failure mode.
+- CLI: direct local planning workflows
+- HTTP service: local integration surface
+- Agent wrapper: slash-command and tool-style control
+- Python client: typed integration contract for external repos
 
-## Target User
+The core guarantees are:
 
-DeepPlan supports users with existing ideas, but its core strength is:
+- schema-backed plan shape
+- QA and validation on core mutations
+- revision snapshots and safe restore preview
+- optimistic concurrency via fingerprints
+- storage health and recovery diagnostics
 
-- users in a zero-idea state
-- users who only know: "I want to build something, but I have not decided what"
+## Core Concepts
 
-DeepPlan should guide this ultra-early stage into a concrete, testable plan.
+DeepPlan centers on one mutable plan plus supporting logs.
 
-## Planning Philosophy
+- `plan`: the current structured planning state
+- `evidence`: concrete signals tied to planning axes
+- `hypothesis_log`: testable bets and outcomes
+- `risks`: failure modes, early signals, mitigation
+- `revisions`: immutable plan snapshots over time
+- `events`: operational history such as auto-replan activity
 
-Humans bring context from life, experience, and intent.
-AI should provide insight to elevate thinking quality, not just generate tasks.
+Long-horizon planning is first-class:
 
-Because model outputs can drift toward average patterns, DeepPlan planning should
-force higher-signal inputs:
+- `planning_horizon`
+- `review_cadence`
+- `phase_plan`
 
-1. Strong references
-2. Actionable insights
-3. Audience interest detection
-4. Need intensity detection
-5. High information density
-6. Multiple viewpoints
-
-## First 10-Minute Outputs
-
-For zero-idea users, DeepPlan should produce these quickly:
-
-1. Problem/User hypothesis (who has what pain)
-2. Three direction options with one explicit choice
-3. A testable initial plan (metric, deadline, first tasks)
-
-## Product Boundary
-
-DeepPlan handles:
-
-- idea discovery
-- direction setting
-- planning logic
-- success/failure criteria definition
-
-DeepPlan does not handle:
-
-- task execution orchestration
-- implementation workflows
-- post-task delivery automation
-
-Those layers are already saturated by other AI tools.
-DeepPlan is the layer that decides what deserves execution.
-
-## Value Thesis
-
-In this thesis:
-
-- `Plan` is where strategic value and monetization leverage live
-- `Task+` layers are increasingly low-differentiation
-- future advantage comes from building better plans, not faster generic execution
-
-## What It Provides
-
-- Shared/exportable plan format (`schemas/plan.schema.json`)
-- CLI (`deepplan.py`)
-- Minimal local HTTP service (`deepplan_server.py`)
-- Agent wrapper + tool schema (`deepplan_agent.py`)
-- Automatic quality checks on `plan` and `replan`
-- Local regression checks (`Makefile`, `tests/test_deepplan.py`)
-- Repo-local state in `.deeplan/`
-
-## Evidence + Hypothesis Loop
-
-DeepPlan now supports evidence-backed planning and hypothesis tracking:
-
-- `evidence` accepts structured objects (`claim`, `source`, `confidence`, `axis`, `date`)
-- `hypothesis_log` tracks testable hypotheses over time (`open/validated/invalidated/pivoted`)
-- QA includes weighted quality checks:
-  - insight quality weighted by depth + axis-linked evidence
-  - evidence quality (quantity, confidence, source diversity)
-  - hypothesis loop coverage
-
-## Insight Axes (Long-Horizon Planning)
-
-DeepPlan maps planning insight into eight required axes:
+Insight coverage is organized across eight axes:
 
 1. `direction_insights`
 2. `market_insights`
@@ -117,30 +57,30 @@ DeepPlan maps planning insight into eight required axes:
 7. `risk_signal_insights`
 8. `evolution_insights`
 
-`qa` checks whether all 8 axes are covered.
+## State Model
 
-## Horizon Fields
+DeepPlan stores repo-local state in `.deeplan/`:
 
-Long-horizon planning is first-class in DeepPlan:
+- `plan.json`: current plan
+- `decisions.jsonl`: decision log
+- `risks.jsonl`: risk log
+- `events.jsonl`: operational events
+- `revisions.jsonl`: revision snapshots
 
-- `planning_horizon` (for example: `12 weeks`, `6 months`)
-- `review_cadence` (for example: `weekly`, `biweekly`)
-- `phase_plan` (milestone phases across the horizon)
+The runtime also tracks:
 
-## Messaging Drafts
+- `fingerprint`: optimistic concurrency token for the current plan
+- revision history for restore and audit
+- storage health, recovery candidates, and retention windows
 
-### Slogans
+## Interface Guide
 
-1. Plan is the product.
-2. Decide what matters before AI builds it.
-3. In the AI era, direction is alpha.
+Use the interface that matches the job:
 
-### Landing Copy (Short)
-
-DeepPlan is a Plan Intelligence tool for the AI era.
-Execution is cheap. Direction is expensive.
-When you do not know what to build yet, DeepPlan helps you turn ambiguity
-into a focused, testable, monetizable plan.
+- CLI: manual planning, local iteration, shell workflows
+- HTTP: editor tools, sidecars, external local services
+- Agent wrapper: slash commands and natural-language tool routing
+- Python client: typed integration from another repo
 
 ## Quick Start
 
@@ -166,45 +106,82 @@ python3 deepplan.py plan \
 python3 deepplan.py qa
 python3 deepplan.py evidence --claim "Segment shows repeated pain" --source "interview-notes" --confidence 70 --axis market
 python3 deepplan.py hypothesis --hypothesis "Narrow segment will adopt weekly" --metric "weekly-active-pilot-users" --target ">=20" --window "14 days" --status open
-python3 deepplan.py insight --topic "AI planning co-work" --references "success:linear,fail:overbuild,counter:no-code tools" --apply
-python3 deepplan.py review --period "week-1" --signals "low-activation,weak-retention" --apply
 python3 deepplan.py show
-python3 deepplan.py validate
-python3 deepplan_agent.py tools
-python3 deepplan_agent.py run --input '/deepplan.qa'
-python3 deepplan_agent.py run --input '/deepplan.validate'
-python3 deepplan_agent.py run --input '/deepplan.replan evidence="pilot users reported repeated friction" evidence_confidence=75 evidence_axis=market'
-python3 deepplan_agent.py run --input 'show plan'
-python3 deepplan_server.py --port 8787
+python3 deepplan.py history
+python3 deepplan.py restore --preview --previous
+python3 deepplan.py health
 ```
 
-## Commands
+## Planning Semantics
 
-- `init`: create `/.deeplan/` files
-- `plan`: create/update plan and run automatic QA
-- `replan`: append execution evidence and re-run automatic QA
-- `decide`: add decision record
-- `risk`: add risk record
+DeepPlan is designed around explicit planning loops:
+
+- `plan`: define or overwrite core direction
+- `evidence`: add structured market/product signal
+- `hypothesis`: track testable assumptions
+- `replan`: adjust execution-facing plan state from new evidence
+- `review`: inspect plan quality and next questions
+- `restore`: recover an earlier planning snapshot safely
+
+QA is built into core plan mutations and can trigger auto-replan when the plan is thin but recoverable.
+
+## Concurrency, Restore, and Retry
+
+### Fingerprints
+
+Every current plan state has a `fingerprint`.
+
+- Writes can include `expected_fingerprint`
+- HTTP callers use `If-Match: "<fingerprint>"`
+- stale writes return `412 Precondition Failed`
+
+### Restore
+
+Restore is treated as a normal write:
+
+- preview via `restore --preview` or `POST /restore/preview`
+- restore via `restore` or `POST /restore`
+- restore uses the same concurrency contract as other writes
+
+### Retry Policy
+
+The Python client has typed conflict and retry semantics:
+
+- `DeepPlanConflictError`: stale fingerprint conflict
+- `DeepPlanClientOperationError`: higher-level multi-step failure
+- `DeepPlanHealthGateError`: optional write blocked by degraded storage health
+
+Default retry policy is conservative:
+
+- automatic refresh-and-retry is enabled for `update_plan`
+- `restore_revision` is also treated as safe overwrite-style retry
+- append-style operations such as `add_evidence` and `replan` require `allow_non_idempotent_retry=True`
+- generalized write flows can require healthy storage with `require_healthy=True`
+
+## CLI
+
+Main commands:
+
+- `init`: create `.deeplan/` state files
+- `plan`: create or overwrite core plan fields
+- `replan`: append execution evidence and plan deltas
+- `decide`: append a decision record
+- `risk`: append a risk record
+- `evidence`: append structured evidence
+- `hypothesis`: append structured hypothesis entries
 - `qa`: run QA checks manually
-- `validate`: validate plan structure and nested record types
-- `schema`: print the runtime schema, check for drift, or rewrite `schemas/plan.schema.json`
-- `health`: print storage health, parseability, and recovery diagnostics
-  - includes latest recoverable revision and whether the current plan matches it
-  - includes current event/revision retention windows
-- `maintenance`: inspect retention state or prune bounded operational logs with `--apply`
-- `show`: print current plan summary, including the latest auto-replan signal when present
-- `history`: print recent revision snapshots
-- `restore`: restore the current plan from a recorded revision snapshot
-  - `restore --preview`: preview changed fields and summary impact before mutation
-  - restore preview now includes structured field-level diff summaries
-  - `restore --previous`: target the immediately previous revision without specifying `revision_id`
-- `ideate`: generate plan ideas from lightweight user context and optionally apply one
-- `insight`: generate viewpoint-expansion insight pack and optionally apply it
-- `review`: run cycle-based planning review with recommendations and next questions
-- `evidence`: add structured evidence linked to planning axes
-- `hypothesis`: append testable hypothesis entries and optional test evidence
+- `validate`: validate plan structure and nested records
+- `schema`: inspect or rewrite `schemas/plan.schema.json`
+- `health`: print storage health and recovery diagnostics
+- `maintenance`: inspect or apply bounded log maintenance
+- `show`: print current plan summary
+- `history`: print revision history
+- `restore`: preview or restore a prior revision
+- `ideate`: generate option seeds from lightweight context
+- `insight`: generate viewpoint-expansion insight packs
+- `review`: run cycle-based review with recommendations
 
-## Dev Checks
+Development checks:
 
 ```bash
 make check
@@ -213,9 +190,9 @@ make compile
 make schema-check
 ```
 
-## HTTP Service
+## HTTP API
 
-DeepPlan also exposes a minimal local HTTP service without external dependencies:
+Start the local service:
 
 ```bash
 python3 deepplan_server.py --host 127.0.0.1 --port 8787
@@ -223,26 +200,20 @@ python3 deepplan_server.py --host 127.0.0.1 --port 8787
 
 Available endpoints:
 
-- `GET /health`: storage health, parseability, and recovery diagnostics
-- `GET /cycle`: plan + QA + health + recent revision history in one snapshot
-- `GET /plan`: full current plan + derived summary, plus a `fingerprint` field and `ETag` header
-- `GET /qa`: QA report as JSON
-- `GET /history`: recent revision snapshots
-- `GET /validate`: structural validation report for the current plan
-- `GET /tools`: available tool schemas for agent/tool callers
-- `POST /plan`: update core plan fields using a JSON object and run QA with auto-replan if needed
-- `POST /evidence`: append one evidence item using JSON
-- `POST /replan`: append execution evidence or incremental plan deltas and run QA with auto-replan if needed
-- `POST /restore/preview`: preview one restore target directly without the `/tools` wrapper
-- `POST /restore`: restore one revision directly with the same `If-Match` concurrency contract as other writes
-- `POST /tools/<tool_name>`: run one tool with `{"input": {...}}`
+- `GET /plan`: current plan, summary, validation, fingerprint
+- `GET /qa`: QA report
+- `GET /health`: storage health and recovery diagnostics
+- `GET /cycle`: plan + QA + health + recent history snapshot
+- `GET /history`: revision history
+- `GET /validate`: structural validation
+- `GET /tools`: agent tool schemas
+- `POST /plan`: update plan fields
+- `POST /evidence`: append one evidence item
+- `POST /replan`: append plan deltas and rerun QA
+- `POST /restore/preview`: preview restore target directly
+- `POST /restore`: restore a revision directly
+- `POST /tools/<tool_name>`: execute one tool wrapper
 - `POST /agent/act`: map slash/natural-language input to a tool call
-
-Write endpoints support optimistic concurrency:
-
-- Send `If-Match: "<fingerprint>"` on HTTP writes to reject stale updates with `412 Precondition Failed`
-- Agent/tool callers can pass `expected_fingerprint` in mutation payloads
-- Successful plan reads and writes return the latest `fingerprint`
 
 Example:
 
@@ -252,50 +223,30 @@ curl http://127.0.0.1:8787/plan
 curl http://127.0.0.1:8787/qa
 curl http://127.0.0.1:8787/health
 curl http://127.0.0.1:8787/history
-curl http://127.0.0.1:8787/validate
-curl http://127.0.0.1:8787/tools
-curl -X POST http://127.0.0.1:8787/evidence \
-  -H 'Content-Type: application/json' \
-  -d '{"claim":"User pain repeated in interviews","source":"interview-notes","confidence":72,"axis":"market"}'
-curl -X POST http://127.0.0.1:8787/replan \
-  -H 'Content-Type: application/json' \
-  -d '{"evidence":"Pilot users reported repeated friction","evidence_source":"pilot","evidence_confidence":75,"evidence_axis":"market"}'
-curl -X POST http://127.0.0.1:8787/restore/preview \
-  -H 'Content-Type: application/json' \
-  -d '{"previous":true}'
 curl -X POST http://127.0.0.1:8787/plan \
   -H 'Content-Type: application/json' \
   -H 'If-Match: "<fingerprint-from-get-plan>"' \
   -d '{"goal":"Ship local agent layer"}'
-curl -X POST http://127.0.0.1:8787/tools/add_hypothesis \
+curl -X POST http://127.0.0.1:8787/restore/preview \
   -H 'Content-Type: application/json' \
-  -d '{"input":{"hypothesis":"Narrow segment returns weekly","metric":"weekly-active-pilot-users","target":">=20","window":"14 days"}}'
-curl -X POST http://127.0.0.1:8787/tools/preview_restore \
-  -H 'Content-Type: application/json' \
-  -d '{"input":{"revision_id":"<revision-id>"}}'
-curl -X POST http://127.0.0.1:8787/agent/act \
-  -H 'Content-Type: application/json' \
-  -d '{"input":"/deepplan.evidence claim=\"Repeated pain in interviews\" source=interviews confidence=75 axis=market"}'
+  -d '{"previous":true}'
 ```
 
 ## Agent Wrapper
 
-DeepPlan now includes a local wrapper for slash-style and lightweight natural-language control:
+The local wrapper exposes slash-style and lightweight natural-language control:
 
 ```bash
 python3 deepplan_agent.py tools
 python3 deepplan_agent.py run --input '/deepplan.show'
 python3 deepplan_agent.py run --input '/deepplan.health'
+python3 deepplan_agent.py run --input '/deepplan.history'
 python3 deepplan_agent.py run --input '/deepplan.restore-preview revision_id=<revision-id>'
 python3 deepplan_agent.py run --input 'preview previous revision'
 python3 deepplan_agent.py run --input '/deepplan.plan goal="Ship local agent layer" planning_horizon="4 weeks" review_cadence=weekly'
 python3 deepplan_agent.py run --input '/deepplan.replan evidence="Pilot retention improved" evidence_confidence=70 evidence_axis=market'
-python3 deepplan_agent.py run --input '/deepplan.history'
 python3 deepplan_agent.py run --input '/deepplan.evidence claim="Repeated planning pain" source=interviews confidence=72 axis=market'
 python3 deepplan_agent.py run --input 'show plan'
-python3 deepplan_agent.py run --input 'qa'
-python3 deepplan.py schema --check
-python3 deepplan.py maintenance --apply
 ```
 
 Supported slash commands:
@@ -313,74 +264,106 @@ Supported slash commands:
 - `/deepplan.evidence`
 - `/deepplan.hypothesis`
 
-Mutation tools now also accept an optional `expected_fingerprint` field so callers can reject stale writes without going through HTTP.
-Tool responses now include stable `ok`, `tool_name`, and `result_type` fields to simplify downstream orchestration.
+Tool responses use stable `ok`, `tool_name`, and `result_type` fields.
 
 ## Python Client
 
-This repo now includes a lightweight integration-facing client in `deepplan_client.py`.
-
-Example:
+The repo includes a lightweight integration-facing client in `deepplan_client.py`.
 
 ```python
-from deepplan_client import DeepPlanClient
+from deepplan_client import (
+    DeepPlanClient,
+    DeepPlanClientOperationError,
+    DeepPlanConflictError,
+    DeepPlanHealthGateError,
+)
 
 client = DeepPlanClient.from_http("127.0.0.1", 8787)
+
 cycle = client.get_cycle(history_limit=5)
-plan = client.get_plan()
 updated = client.update_plan({"goal": "Ship local agent layer"})
+
 wrapped = client.apply_and_get_cycle(
     "update_plan",
     {"goal": "Ship local agent layer", "success_metric": "Reach 2 pilots", "deadline": "2026-04-03"},
     history_limit=3,
 )
+
 restored = client.apply_and_get_cycle(
     "restore_revision",
     {"previous": True},
     history_limit=3,
 )
+
 retried = client.apply_and_get_cycle_with_retry(
     "update_plan",
     {"goal": "Ship local agent layer"},
     expected_fingerprint="stale-fingerprint",
 )
+
 cycle_result = client.capture_evidence_cycle(
     {"claim": "Pilot friction repeated", "source": "pilot-call", "confidence": 74, "axis": "market"},
     replan_payload={"plan_task": "Tighten onboarding loop"},
 )
-preview = client.preview_restore(previous=True)
 ```
 
-High-level client wrappers now raise `DeepPlanConflictError` for stale fingerprint conflicts and `DeepPlanClientOperationError` for step-scoped multi-call failures.
-By default, retry-after-refresh is only enabled for `update_plan`; append-style operations like `add_evidence` and `replan` require `allow_non_idempotent_retry=True`.
-Set `require_healthy=True` on generalized client flows when writes should be blocked unless storage health is currently `ok`.
+Use the client when another repo needs DeepPlan as a planning kernel without re-implementing:
 
-## Agent Input Mapping
+- stale-write handling
+- refresh-and-retry policy
+- post-write cycle snapshots
+- restore preview / restore flows
+- optional health-gated writes
 
-Bundled wrapper behavior:
-- `/deepplan` and `/deepplan.plan` -> `update_plan` tool payload
-- `/deepplan.replan` -> `replan` tool payload
-- `/deepplan.show` -> `get_plan`
-- `/deepplan.health` -> `get_health`
-- `/deepplan.history` -> `get_history`
-- `/deepplan.restore` -> `restore_revision`
-- `/deepplan.restore-preview` -> `preview_restore`
-- `/deepplan.qa` -> `get_qa`
-- `/deepplan.validate` -> `validate_plan`
-- `/deepplan.evidence` -> `add_evidence`
-- `/deepplan.hypothesis` -> `add_hypothesis`
+## Product Thesis
 
-Natural-language examples:
-- `python3 deepplan_agent.py run --input 'update plan goal=\"Ship local agent layer\" deadline=2026-04-15'`
-- `python3 deepplan_agent.py run --dry-run --input '/deepplan.replan evidence=\"Pilot users returned\" evidence_confidence=70 evidence_axis=market'`
-- `python3 deepplan.py ideate --profile "solo builder" --interests "automation,creator tools" --count 5 --apply 2`
+In the AI era, execution is increasingly commoditized.
+Direction quality is not.
 
-## Storage
+If planning is weak, faster execution only accelerates the wrong path.
+DeepPlan exists to reduce that failure mode.
 
-- `.deeplan/plan.json`
-- `.deeplan/decisions.jsonl`
-- `.deeplan/risks.jsonl`
-- `.deeplan/events.jsonl`
-- `.deeplan/revisions.jsonl`
+DeepPlan is `plan-only` by design:
 
-This is intentionally minimal and meant to be used by AI agents (Codex/Claude Code) as a common local planning primitive.
+- idea discovery
+- direction setting
+- planning logic
+- success and failure criteria
+
+It intentionally does not try to own execution orchestration or delivery automation.
+
+## Planning Philosophy
+
+Humans bring context from life, experience, and intent.
+AI should improve thinking quality, not just generate tasks.
+
+DeepPlan planning favors:
+
+1. Strong references
+2. Actionable insights
+3. Audience interest detection
+4. Need intensity detection
+5. High information density
+6. Multiple viewpoints
+
+## First 10-Minute Outputs
+
+For zero-idea or weakly formed ideas, DeepPlan should quickly produce:
+
+1. Problem / user hypothesis
+2. Three direction options with one explicit choice
+3. A testable initial plan with metric, deadline, and first tasks
+
+## Messaging Drafts
+
+Slogans:
+
+1. Plan is the product.
+2. Decide what matters before AI builds it.
+3. In the AI era, direction is alpha.
+
+Short copy:
+
+DeepPlan is a Plan Intelligence tool for the AI era.
+Execution is cheap. Direction is expensive.
+When you do not know what to build yet, DeepPlan helps turn ambiguity into a focused, testable, monetizable plan.
