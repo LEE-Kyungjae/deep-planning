@@ -334,6 +334,11 @@ wrapped = client.apply_and_get_cycle(
     {"goal": "Ship local agent layer", "success_metric": "Reach 2 pilots", "deadline": "2026-04-03"},
     history_limit=3,
 )
+restored = client.apply_and_get_cycle(
+    "restore_revision",
+    {"previous": True},
+    history_limit=3,
+)
 retried = client.apply_and_get_cycle_with_retry(
     "update_plan",
     {"goal": "Ship local agent layer"},

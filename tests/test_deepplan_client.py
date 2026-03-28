@@ -204,6 +204,33 @@ class DeepPlanClientTests(unittest.TestCase):
         self.assertEqual(result["post_cycle"]["history_limit"], 1)
         self.assertEqual(client.tracked_fingerprint, result["post_fingerprint"])
 
+    def test_apply_and_get_cycle_wraps_restore_revision_with_post_cycle_snapshot(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            client = DeepPlanClient(transport=handler_transport)
+            first = client.update_plan(
+                {
+                    "goal": "wrapped restore first",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                }
+            )
+            second = client.update_plan({"goal": "wrapped restore second"})
+            result = client.apply_and_get_cycle(
+                "restore_revision",
+                {"previous": True},
+                expected_fingerprint=second["fingerprint"],
+                history_limit=1,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["operation"], "restore_revision")
+        self.assertEqual(result["mutation_result"]["plan"]["goal"], "wrapped restore first")
+        self.assertEqual(result["post_cycle"]["plan"]["goal"], "wrapped restore first")
+        self.assertEqual(result["post_cycle"]["history_limit"], 1)
+        self.assertEqual(client.tracked_fingerprint, result["post_fingerprint"])
+        self.assertNotEqual(first["fingerprint"], second["fingerprint"])
+
     def test_apply_and_get_cycle_surfaces_typed_operation_error(self):
         with DeepPlanStateIsolation():
             deepplan.ensure_state()
@@ -289,6 +316,35 @@ class DeepPlanClientTests(unittest.TestCase):
         self.assertEqual(result["retry_from_fingerprint"], initial["fingerprint"])
         self.assertTrue(result["retry_to_fingerprint"])
         self.assertEqual(client.tracked_fingerprint, result["post_fingerprint"])
+
+    def test_apply_and_get_cycle_with_retry_recovers_restore_revision_once(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            client = DeepPlanClient(transport=handler_transport)
+            initial = client.get_plan()
+            client.update_plan(
+                {
+                    "goal": "retry restore first",
+                    "success_metric": "Reach 2 pilots",
+                    "deadline": "2026-04-03",
+                }
+            )
+            latest = client.update_plan({"goal": "retry restore second"})
+            result = client.apply_and_get_cycle_with_retry(
+                "restore_revision",
+                {"previous": True},
+                expected_fingerprint=initial["fingerprint"],
+                history_limit=1,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["retried"])
+        self.assertEqual(result["attempts"], 2)
+        self.assertEqual(result["operation"], "restore_revision")
+        self.assertEqual(result["post_cycle"]["plan"]["goal"], "retry restore first")
+        self.assertEqual(result["retry_from_fingerprint"], initial["fingerprint"])
+        self.assertTrue(result["retry_to_fingerprint"])
+        self.assertNotEqual(latest["fingerprint"], result["post_fingerprint"])
 
     def test_apply_and_get_cycle_with_retry_does_not_retry_validation_error(self):
         with DeepPlanStateIsolation():

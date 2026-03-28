@@ -213,10 +213,18 @@ class DeepPlanClient:
         history_limit: int = 10,
         expected_fingerprint: str = "",
     ) -> Dict[str, Any]:
+        def restore_mutation(input_payload: Dict[str, Any], *, expected_fingerprint: str = "") -> Dict[str, Any]:
+            return self.restore_revision(
+                revision_id=str(input_payload.get("revision_id", "")).strip(),
+                previous=bool(input_payload.get("previous", False)),
+                expected_fingerprint=expected_fingerprint,
+            )
+
         mutation_map = {
             "update_plan": self.update_plan,
             "replan": self.replan,
             "add_evidence": self.add_evidence,
+            "restore_revision": restore_mutation,
         }
         if operation not in mutation_map:
             raise ValueError(f"unsupported operation: {operation}")
@@ -262,7 +270,7 @@ class DeepPlanClient:
         except DeepPlanConflictError as exc:
             if not exc.can_refresh:
                 raise
-            if operation != "update_plan" and not allow_non_idempotent_retry:
+            if operation not in {"update_plan", "restore_revision"} and not allow_non_idempotent_retry:
                 raise
             refreshed = self.get_cycle(history_limit=history_limit)
             attempt += 1
