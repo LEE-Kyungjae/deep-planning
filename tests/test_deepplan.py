@@ -73,6 +73,12 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertEqual(restore_tool, "restore_revision")
         self.assertEqual(restore_payload, {"previous": True})
 
+    def test_slash_command_mapping_covers_reference_discovery(self):
+        tool_name, payload = deepplan_agent.slash_to_tool("/deepplan.discover question=design-agent references=repo-a,repo-b")
+
+        self.assertEqual(tool_name, "run_reference_discovery")
+        self.assertEqual(payload, {"question": "design-agent", "references": ["repo-a", "repo-b"]})
+
     def test_add_evidence_idempotency_key_replays_without_duplicate_append(self):
         with DeepPlanStateIsolation():
             deepplan.ensure_state()
@@ -885,6 +891,34 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertEqual(payload["tool"], "preview_restore")
         self.assertEqual(payload["input"], {"revision_id": "rev-789"})
 
+    def test_cmd_discover_apply_persists_reference_discovery(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                deepplan.cmd_discover(
+                    type(
+                        "Args",
+                        (),
+                        {
+                            "question": "design agent examples",
+                            "context": "Need GitHub references for product UX hierarchy",
+                            "references": "repo-a,repo-b",
+                            "rejected": "repo-c",
+                            "json": False,
+                            "apply": True,
+                        },
+                    )()
+                )
+            plan = deepplan.load_plan()
+            output = stdout.getvalue()
+
+        self.assertIn("Reference discovery applied to current plan.", output)
+        self.assertEqual(len(plan["reference_discoveries"]), 1)
+        self.assertEqual(plan["reference_discoveries"][0]["search_mode"], "github-pattern-scan")
+        self.assertIn("repo-a", plan["references"])
+        self.assertTrue(any(item.get("source") == "reference-discovery" for item in deepplan.evidence_objects(plan)))
+
     def test_tool_schema_contract_report_matches_runtime_expectations(self):
         report = deepplan_agent.tool_schema_contract_report()
 
@@ -927,6 +961,26 @@ class DeepPlanRegressionTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["tool_name"], "preview_restore")
         self.assertEqual(result["result_type"], "restore_preview")
+
+    def test_run_reference_discovery_tool_can_apply_and_return_plan_state(self):
+        with DeepPlanStateIsolation():
+            deepplan.ensure_state()
+            result = deepplan_agent.execute_tool(
+                "run_reference_discovery",
+                {
+                    "question": "design agent examples",
+                    "context": "Need GitHub references for product UX hierarchy",
+                    "references": ["repo-a"],
+                    "apply": True,
+                },
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["tool_name"], "run_reference_discovery")
+        self.assertEqual(result["result_type"], "reference_discovery")
+        self.assertTrue(result["applied"])
+        self.assertEqual(result["search_mode"], "github-pattern-scan")
+        self.assertEqual(len(result["plan"]["reference_discoveries"]), 1)
 
 
 if __name__ == "__main__":

@@ -64,6 +64,7 @@ def default_plan() -> Dict:
         "definition_of_done": [],
         "evidence": [],
         "hypothesis_log": [],
+        "reference_discoveries": [],
     }
 
 
@@ -106,6 +107,7 @@ def migrate_plan(plan: Dict) -> Dict:
         ("definition_of_done", []),
         ("evidence", []),
         ("hypothesis_log", []),
+        ("reference_discoveries", []),
     ]:
         plan.setdefault(key, default)
 
@@ -189,6 +191,28 @@ def validate_hypothesis_item(item, index: int) -> List[str]:
     return errors
 
 
+def validate_reference_discovery_item(item, index: int) -> List[str]:
+    errors: List[str] = []
+    prefix = f"reference_discoveries[{index}]"
+    if not isinstance(item, dict):
+        return [f"{prefix} must be an object"]
+    for key in ["ts", "question", "search_mode"]:
+        if not isinstance(item.get(key), str) or not item.get(key, "").strip():
+            errors.append(f"{prefix}.{key} must be a non-empty string")
+    for key in ["trigger_signals", "selection_criteria", "candidate_queries", "shortlisted_references", "rejected_references"]:
+        value = item.get(key)
+        if not isinstance(value, list):
+            errors.append(f"{prefix}.{key} must be an array")
+            continue
+        if not all(isinstance(entry, str) and entry.strip() for entry in value):
+            errors.append(f"{prefix}.{key} must contain only non-empty strings")
+    for key in ["context", "decision", "notes"]:
+        value = item.get(key, "")
+        if value != "" and not isinstance(value, str):
+            errors.append(f"{prefix}.{key} must be a string")
+    return errors
+
+
 def validate_plan_shape(plan: Dict) -> Dict:
     expected = default_plan()
     errors: List[str] = []
@@ -217,6 +241,9 @@ def validate_plan_shape(plan: Dict) -> Dict:
     if isinstance(plan.get("hypothesis_log"), list):
         for index, item in enumerate(plan["hypothesis_log"]):
             errors.extend(validate_hypothesis_item(item, index))
+    if isinstance(plan.get("reference_discoveries"), list):
+        for index, item in enumerate(plan["reference_discoveries"]):
+            errors.extend(validate_reference_discovery_item(item, index))
 
     return {"valid": len(errors) == 0, "errors": errors}
 
@@ -310,6 +337,27 @@ def build_plan_schema() -> Dict:
                             "enum": ["open", "validated", "invalidated", "pivoted"],
                         },
                         "outcome": {"type": "string"},
+                    },
+                    "additionalProperties": True,
+                },
+            },
+            "reference_discoveries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["ts", "question", "search_mode", "trigger_signals", "selection_criteria", "candidate_queries", "shortlisted_references", "rejected_references"],
+                    "properties": {
+                        "ts": {"type": "string"},
+                        "question": {"type": "string"},
+                        "context": {"type": "string"},
+                        "search_mode": {"type": "string"},
+                        "trigger_signals": {"type": "array", "items": {"type": "string"}},
+                        "selection_criteria": {"type": "array", "items": {"type": "string"}},
+                        "candidate_queries": {"type": "array", "items": {"type": "string"}},
+                        "shortlisted_references": {"type": "array", "items": {"type": "string"}},
+                        "rejected_references": {"type": "array", "items": {"type": "string"}},
+                        "decision": {"type": "string"},
+                        "notes": {"type": "string"},
                     },
                     "additionalProperties": True,
                 },
@@ -924,6 +972,131 @@ def add_evidence(plan: Dict, claim: str, source: str, confidence: int = 60, axis
     plan.setdefault("evidence", []).append(evidence_object(claim, source, confidence, axis, evidence_date))
 
 
+def infer_reference_trigger_signals(question: str, context: str = "") -> List[str]:
+    text = f"{question} {context}".lower()
+    signal_map = [
+        ("github", "github_examples"),
+        ("repo", "repository_examples"),
+        ("prompt", "prompt_patterns"),
+        ("agent", "agent_patterns"),
+        ("design", "design_patterns"),
+        ("ui", "ui_patterns"),
+        ("ux", "ux_patterns"),
+        ("reference", "reference_lookup"),
+        ("example", "example_lookup"),
+        ("case", "case_study_lookup"),
+        ("similar", "similar_implementation_lookup"),
+        ("benchmark", "benchmark_lookup"),
+        ("docs", "documentation_lookup"),
+        ("official", "official_documentation_lookup"),
+        ("paper", "research_lookup"),
+    ]
+    matches = [label for keyword, label in signal_map if keyword in text]
+    return matches or ["generic_reference_lookup"]
+
+
+def infer_reference_search_mode(question: str, context: str = "") -> str:
+    signals = infer_reference_trigger_signals(question, context)
+    if any(signal in signals for signal in ["github_examples", "repository_examples", "prompt_patterns", "agent_patterns"]):
+        return "github-pattern-scan"
+    if any(signal in signals for signal in ["official_documentation_lookup", "documentation_lookup"]):
+        return "docs-scan"
+    if any(signal in signals for signal in ["research_lookup", "benchmark_lookup"]):
+        return "research-scan"
+    if any(signal in signals for signal in ["design_patterns", "ui_patterns", "ux_patterns"]):
+        return "design-pattern-scan"
+    return "general-reference-scan"
+
+
+def compact_topic_slug(question: str, fallback: str = "topic") -> str:
+    tokens = re.findall(r"[a-z0-9]+", question.lower())
+    selected = tokens[:6]
+    return "-".join(selected) if selected else fallback
+
+
+def build_reference_discovery_pack(question: str, context: str = "", references: Optional[List[str]] = None, rejected: Optional[List[str]] = None) -> Dict[str, Any]:
+    clean_question = ensure_non_empty_text(question, "question")
+    clean_context = context.strip()
+    shortlisted = [item.strip() for item in references or [] if isinstance(item, str) and item.strip()]
+    rejected_items = [item.strip() for item in rejected or [] if isinstance(item, str) and item.strip()]
+    search_mode = infer_reference_search_mode(clean_question, clean_context)
+    trigger_signals = infer_reference_trigger_signals(clean_question, clean_context)
+    topic_slug = compact_topic_slug(clean_question)
+
+    selection_criteria = [
+        "Prefer references that directly address the active planning question rather than generic inspiration.",
+        "Prefer references with reusable decision patterns, not just polished outputs.",
+        "Reject references that optimize runtime/framework novelty instead of the target planning problem.",
+    ]
+    if search_mode == "github-pattern-scan":
+        selection_criteria.append("Prioritize repositories with explicit prompt structure, role boundaries, or workflow examples.")
+    elif search_mode == "design-pattern-scan":
+        selection_criteria.append("Prioritize product UX hierarchy and information architecture guidance over visual polish alone.")
+    elif search_mode == "docs-scan":
+        selection_criteria.append("Prioritize primary-source docs over summaries or tertiary commentary.")
+    elif search_mode == "research-scan":
+        selection_criteria.append("Prioritize comparable evaluation setups and measurable outcomes.")
+
+    candidate_queries = [
+        clean_question,
+        f"{topic_slug} best reference examples",
+        f"{topic_slug} {search_mode}",
+    ]
+    if "github-pattern-scan" == search_mode:
+        candidate_queries.append(f"site:github.com {clean_question}")
+    if "design-pattern-scan" == search_mode:
+        candidate_queries.append(f"{clean_question} product ux hierarchy")
+
+    plan_updates = {
+        "plan_tasks": [
+            f"Run reference discovery for: {clean_question}",
+            "Score shortlisted references against explicit selection criteria before adopting any pattern.",
+        ],
+        "execution_tasks": [
+            "Apply one selected reference pattern and measure whether it improves the target planning decision.",
+        ],
+        "evolution_insights": [
+            "When the conversation shifts to examples or references, trigger discovery and log selection criteria before committing to a direction.",
+        ],
+    }
+
+    decision = (
+        f"Use {search_mode} before committing on '{clean_question}'."
+        if not shortlisted
+        else f"Review {len(shortlisted)} shortlisted reference(s) before adopting any pattern for '{clean_question}'."
+    )
+
+    return {
+        "question": clean_question,
+        "context": clean_context,
+        "search_mode": search_mode,
+        "trigger_signals": trigger_signals,
+        "selection_criteria": selection_criteria,
+        "candidate_queries": candidate_queries,
+        "shortlisted_references": shortlisted,
+        "rejected_references": rejected_items,
+        "decision": decision,
+        "notes": "",
+        "plan_updates": plan_updates,
+    }
+
+
+def reference_discovery_record(pack: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "ts": now_iso(),
+        "question": str(pack.get("question", "")).strip(),
+        "context": str(pack.get("context", "")).strip(),
+        "search_mode": str(pack.get("search_mode", "")).strip(),
+        "trigger_signals": [item.strip() for item in pack.get("trigger_signals", []) if isinstance(item, str) and item.strip()],
+        "selection_criteria": [item.strip() for item in pack.get("selection_criteria", []) if isinstance(item, str) and item.strip()],
+        "candidate_queries": [item.strip() for item in pack.get("candidate_queries", []) if isinstance(item, str) and item.strip()],
+        "shortlisted_references": [item.strip() for item in pack.get("shortlisted_references", []) if isinstance(item, str) and item.strip()],
+        "rejected_references": [item.strip() for item in pack.get("rejected_references", []) if isinstance(item, str) and item.strip()],
+        "decision": str(pack.get("decision", "")).strip(),
+        "notes": str(pack.get("notes", "")).strip(),
+    }
+
+
 def default_deadline(days: int = 14) -> str:
     return (date.today() + timedelta(days=days)).isoformat()
 
@@ -1096,6 +1269,16 @@ def horizon_defined(plan: Dict) -> bool:
     return non_empty(plan.get("planning_horizon")) and non_empty(plan.get("review_cadence"))
 
 
+def reference_discovery_logged(plan: Dict) -> bool:
+    discoveries = plan.get("reference_discoveries", [])
+    references = plan.get("references", [])
+    if not isinstance(discoveries, list):
+        return False
+    if not isinstance(references, list) or len(references) == 0:
+        return True
+    return len(discoveries) > 0
+
+
 @dataclass
 class CheckResult:
     name: str
@@ -1134,6 +1317,14 @@ def run_qa(plan: Dict) -> Tuple[int, List[CheckResult], bool]:
             len(plan.get("references", [])) >= 3,
             "Plan includes at least three references (docs, cases, benchmarks).",
             10,
+        )
+    )
+    checks.append(
+        CheckResult(
+            "reference_discovery_loop",
+            reference_discovery_logged(plan),
+            "External references are paired with at least one logged discovery/selection pass.",
+            5,
         )
     )
     checks.append(
@@ -1299,6 +1490,7 @@ def plan_summary(plan: Dict) -> Dict:
         "execution_task_count": e,
         "plan_ratio": round((p / total * 100), 1) if total > 0 else None,
         "reference_count": len(plan.get("references", [])),
+        "reference_discovery_count": len(plan.get("reference_discoveries", [])),
         "insight_count": len(plan.get("insights", [])),
         "insight_axes_covered": covered,
         "insight_axes_total": 8,
@@ -1398,6 +1590,13 @@ def auto_replan(plan: Dict, checks: List[CheckResult]) -> Tuple[Dict, List[str],
         ])
         if len(plan["references"]) > before:
             add_autoreplan_action(actions, "Added missing reference coverage.")
+    if "reference_discovery_loop" in failed:
+        before = len(plan.get("plan_tasks", []))
+        plan["plan_tasks"] = extend_unique_strings(plan.get("plan_tasks", []), [
+            "Run and log one reference discovery pass before adopting external patterns.",
+        ])
+        if len(plan["plan_tasks"]) > before:
+            add_autoreplan_action(actions, "Added reference-discovery follow-up task.")
     if "insight_axes_coverage" in failed and len(plan.get("insights", [])) < 3:
         before = len(plan.get("insights", []))
         plan["insights"] = extend_unique_strings(plan.get("insights", []), [
@@ -1943,6 +2142,7 @@ def cmd_show(_: argparse.Namespace) -> None:
     print(f"Execution Tasks: {summary['execution_task_count']}")
     print(f"Plan Ratio: {plan_ratio}")
     print(f"References: {summary['reference_count']}")
+    print(f"Reference Discoveries: {summary['reference_discovery_count']}")
     print(f"Insights: {summary['insight_count']}")
     print(f"Insight Axes Covered: {summary['insight_axes_covered']}/{summary['insight_axes_total']}")
     print(f"Insight Quality (weighted): {summary['weighted_insight_quality']:.2f}")
@@ -2131,6 +2331,94 @@ def cmd_insight(args: argparse.Namespace) -> None:
                 print(f"- {r}")
 
 
+def cmd_discover(args: argparse.Namespace) -> None:
+    ensure_state()
+    plan = load_plan()
+    question = args.question.strip() if args.question else plan.get("goal", "").strip()
+    pack = build_reference_discovery_pack(
+        question=question,
+        context=args.context.strip() if args.context else "",
+        references=parse_csv(args.references) if args.references else [],
+        rejected=parse_csv(args.rejected) if args.rejected else [],
+    )
+    output = {
+        "question": pack["question"],
+        "context": pack["context"],
+        "search_mode": pack["search_mode"],
+        "trigger_signals": pack["trigger_signals"],
+        "selection_criteria": pack["selection_criteria"],
+        "candidate_queries": pack["candidate_queries"],
+        "shortlisted_references": pack["shortlisted_references"],
+        "rejected_references": pack["rejected_references"],
+        "decision": pack["decision"],
+        "plan_updates": pack["plan_updates"],
+    }
+
+    if args.apply:
+        record = reference_discovery_record(pack)
+        mutate_plan_state(
+            lambda current_plan: (
+                current_plan.setdefault("reference_discoveries", []).append(record),
+                current_plan.setdefault("references", []).extend(pack["shortlisted_references"]) if pack["shortlisted_references"] else None,
+                current_plan.setdefault("plan_tasks", []).extend(
+                    [item for item in pack["plan_updates"]["plan_tasks"] if item not in current_plan.get("plan_tasks", [])]
+                ),
+                current_plan.setdefault("execution_tasks", []).extend(
+                    [item for item in pack["plan_updates"]["execution_tasks"] if item not in current_plan.get("execution_tasks", [])]
+                ),
+                current_plan.setdefault("evolution_insights", []).extend(
+                    [item for item in pack["plan_updates"]["evolution_insights"] if item not in current_plan.get("evolution_insights", [])]
+                ),
+                add_evidence(
+                    current_plan,
+                    f"Reference discovery logged for '{pack['question']}' via {pack['search_mode']}.",
+                    "reference-discovery",
+                    72,
+                    "evolution",
+                ),
+            ),
+            event_payloads=[
+                {
+                    "ts": now_iso(),
+                    "type": "reference_discovery",
+                    "source": "cmd_discover",
+                    "question": pack["question"],
+                    "search_mode": pack["search_mode"],
+                    "shortlisted_count": len(pack["shortlisted_references"]),
+                }
+            ],
+            revision_source="cmd_discover",
+            revision_reason=pack["question"],
+        )
+        output["applied"] = True
+        print("Reference discovery applied to current plan.")
+
+    if args.json:
+        print(json.dumps(output, indent=2, ensure_ascii=False))
+        return
+
+    print(f"Question: {output['question']}")
+    print(f"Search Mode: {output['search_mode']}")
+    print("Trigger Signals:")
+    for item in output["trigger_signals"]:
+        print(f"- {item}")
+    print("Selection Criteria:")
+    for item in output["selection_criteria"]:
+        print(f"- {item}")
+    print("Candidate Queries:")
+    for item in output["candidate_queries"]:
+        print(f"- {item}")
+    if output["shortlisted_references"]:
+        print("Shortlisted References:")
+        for item in output["shortlisted_references"]:
+            print(f"- {item}")
+    if output["rejected_references"]:
+        print("Rejected References:")
+        for item in output["rejected_references"]:
+            print(f"- {item}")
+    print(f"Decision: {output['decision']}")
+
+
 def missing_insight_axes(plan: Dict) -> List[str]:
     axis_map = {
         "direction_insights": "direction",
@@ -2155,6 +2443,8 @@ def cmd_review(args: argparse.Namespace) -> None:
     missing_axes = missing_insight_axes(plan)
     has_horizon = horizon_defined(plan)
     has_phases = non_empty(plan.get("phase_plan"))
+    discovery_count = len(plan.get("reference_discoveries", []))
+    has_reference_loop = reference_discovery_logged(plan)
     period = args.period.strip() if args.period else "current cycle"
     notes = args.notes.strip() if args.notes else ""
     signals = parse_csv(args.signals) if args.signals else []
@@ -2166,6 +2456,8 @@ def cmd_review(args: argparse.Namespace) -> None:
         next_questions.append("What planning horizon and review cadence are realistic for this initiative?")
     if not has_phases:
         next_questions.append("What 3-phase milestone structure should guide the next horizon?")
+    if not has_reference_loop:
+        next_questions.append("Which external reference question needs a logged discovery pass before the next decision?")
     if not signals:
         next_questions.append("What early risk signal should be tracked in the next review cycle?")
     if not hypothesis_loop_ok(plan):
@@ -2186,6 +2478,8 @@ def cmd_review(args: argparse.Namespace) -> None:
         recommendations.append("Set planning horizon and review cadence explicitly.")
     if not has_phases:
         recommendations.append("Define phase milestones for the active horizon.")
+    if not has_reference_loop:
+        recommendations.append("Run reference discovery and log selection criteria before relying on external examples.")
     if not hypothesis_loop_ok(plan):
         recommendations.append("Add hypothesis entries with metric/target/window and update status each cycle.")
     if signals:
@@ -2200,6 +2494,8 @@ def cmd_review(args: argparse.Namespace) -> None:
         "missing_insight_axes": missing_axes,
         "horizon_defined": has_horizon,
         "phase_plan_defined": has_phases,
+        "reference_discovery_count": discovery_count,
+        "reference_discovery_logged": has_reference_loop,
         "signals": signals,
         "notes": notes,
         "recommendations": recommendations,
@@ -2460,6 +2756,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true")
     s.add_argument("--apply", action="store_true")
     s.set_defaults(func=cmd_insight)
+
+    s = sub.add_parser("discover")
+    s.add_argument("--question", type=str, default="")
+    s.add_argument("--context", type=str, default="")
+    s.add_argument("--references", type=str, default="")
+    s.add_argument("--rejected", type=str, default="")
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--apply", action="store_true")
+    s.set_defaults(func=cmd_discover)
 
     s = sub.add_parser("review")
     s.add_argument("--period", type=str, default="")

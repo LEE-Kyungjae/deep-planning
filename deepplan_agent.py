@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from deepplan import (
     add_evidence,
     apply_replan_payload,
+    build_reference_discovery_pack,
     get_revision,
     list_revisions,
     load_plan,
@@ -19,6 +20,7 @@ from deepplan import (
     qa_autoreplan_result,
     qa_report,
     record_idempotency_result,
+    reference_discovery_record,
     replay_idempotency_result,
     resolve_revision_reference,
     restore_preview,
@@ -111,6 +113,22 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "properties": {
                 "revision_id": {"type": "string"},
                 "previous": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "run_reference_discovery",
+        "description": "Generate and optionally apply a structured reference-discovery pass for an open planning question.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "expected_fingerprint": {"type": "string"},
+                "question": {"type": "string"},
+                "context": {"type": "string"},
+                "references": {"type": "array", "items": {"type": "string"}},
+                "rejected": {"type": "array", "items": {"type": "string"}},
+                "apply": {"type": "boolean"},
             },
             "additionalProperties": False,
         },
@@ -247,6 +265,7 @@ TOOL_VALIDATORS = {
     "get_history": "validate_history_payload",
     "restore_revision": "validate_restore_payload",
     "preview_restore": "validate_preview_restore_payload",
+    "run_reference_discovery": "validate_reference_discovery_payload",
     "replan": "validate_replan_payload",
     "update_plan": "validate_update_payload",
     "add_evidence": "validate_evidence_payload",
@@ -255,6 +274,7 @@ TOOL_VALIDATORS = {
 
 MUTATION_TOOLS = {
     "restore_revision",
+    "run_reference_discovery",
     "replan",
     "update_plan",
     "add_evidence",
@@ -366,6 +386,29 @@ def validate_evidence_payload(payload: Dict[str, Any]) -> None:
         raise ValueError("confidence must be an integer")
 
 
+def validate_reference_discovery_payload(payload: Dict[str, Any]) -> None:
+    ensure_object_payload(payload)
+    validate_expected_fingerprint(payload)
+    allowed = {"expected_fingerprint", "question", "context", "references", "rejected", "apply"}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ValueError(f"unknown run_reference_discovery fields: {', '.join(unknown)}")
+    if "question" in payload and not isinstance(payload["question"], str):
+        raise ValueError("question must be a string")
+    if "context" in payload and not isinstance(payload["context"], str):
+        raise ValueError("context must be a string")
+    for key in ["references", "rejected"]:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if not isinstance(value, list):
+            raise ValueError(f"{key} must be an array")
+        if not all(isinstance(item, str) for item in value):
+            raise ValueError(f"{key} must contain only strings")
+    if "apply" in payload and not isinstance(payload["apply"], bool):
+        raise ValueError("apply must be a boolean")
+
+
 def validate_hypothesis_payload(payload: Dict[str, Any]) -> None:
     ensure_object_payload(payload)
     validate_expected_fingerprint(payload)
@@ -474,6 +517,7 @@ def tool_schema_contract_report() -> Dict[str, Any]:
         "get_history",
         "restore_revision",
         "preview_restore",
+        "run_reference_discovery",
         "replan",
         "update_plan",
         "add_evidence",
@@ -562,6 +606,63 @@ def execute_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             "restore_preview",
             restore_preview(str(payload.get("revision_id", "")).strip(), previous=bool(payload.get("previous", False))),
         )
+
+    if name == "run_reference_discovery":
+        validate_reference_discovery_payload(payload)
+        plan = load_plan()
+        question = str(payload.get("question", "")).strip() or str(plan.get("goal", "")).strip()
+        pack = build_reference_discovery_pack(
+            question=question,
+            context=str(payload.get("context", "")).strip(),
+            references=payload.get("references", []),
+            rejected=payload.get("rejected", []),
+        )
+        response = {
+            "question": pack["question"],
+            "context": pack["context"],
+            "search_mode": pack["search_mode"],
+            "trigger_signals": pack["trigger_signals"],
+            "selection_criteria": pack["selection_criteria"],
+            "candidate_queries": pack["candidate_queries"],
+            "shortlisted_references": pack["shortlisted_references"],
+            "rejected_references": pack["rejected_references"],
+            "decision": pack["decision"],
+            "plan_updates": pack["plan_updates"],
+        }
+        if bool(payload.get("apply", False)):
+            record = reference_discovery_record(pack)
+            result = mutate_plan_state(
+                lambda current_plan: (
+                    current_plan.setdefault("reference_discoveries", []).append(record),
+                    current_plan.setdefault("references", []).extend(pack["shortlisted_references"]) if pack["shortlisted_references"] else None,
+                    current_plan.setdefault("plan_tasks", []).extend(
+                        [item for item in pack["plan_updates"]["plan_tasks"] if item not in current_plan.get("plan_tasks", [])]
+                    ),
+                    current_plan.setdefault("execution_tasks", []).extend(
+                        [item for item in pack["plan_updates"]["execution_tasks"] if item not in current_plan.get("execution_tasks", [])]
+                    ),
+                    current_plan.setdefault("evolution_insights", []).extend(
+                        [item for item in pack["plan_updates"]["evolution_insights"] if item not in current_plan.get("evolution_insights", [])]
+                    ),
+                    add_evidence(
+                        current_plan,
+                        f"Reference discovery logged for '{pack['question']}' via {pack['search_mode']}.",
+                        "reference-discovery",
+                        72,
+                        "evolution",
+                    ),
+                ),
+                expected_fingerprint=payload.get("expected_fingerprint"),
+                revision_source="run_reference_discovery",
+                revision_reason=pack["question"],
+            )
+            response["applied"] = True
+            response["plan"] = result
+            response["summary"] = plan_summary(result)
+            response["validation"] = validate_plan_shape(result)
+            response["fingerprint"] = plan_fingerprint(result)
+            response["qa"] = qa_report(result)
+        return enrich_tool_result(name, "reference_discovery", response)
 
     if name == "replan":
         validate_replan_payload(payload)
@@ -715,6 +816,7 @@ def slash_to_tool(command: str) -> Tuple[str, Dict[str, Any]]:
         "/deepplan.history": "get_history",
         "/deepplan.restore": "restore_revision",
         "/deepplan.restore-preview": "preview_restore",
+        "/deepplan.discover": "run_reference_discovery",
         "/deepplan.health": "get_health",
         "/deepplan.qa": "get_qa",
         "/deepplan.validate": "validate_plan",
@@ -746,6 +848,10 @@ def natural_language_to_tool(text: str) -> Tuple[str, Dict[str, Any]]:
         return "validate_plan", {}
     if lowered.startswith("replan "):
         return "replan", parse_assignment_tokens(shlex.split(stripped[len("replan ") :]))
+    if lowered.startswith("reference discovery "):
+        return "run_reference_discovery", parse_assignment_tokens(shlex.split(stripped[len("reference discovery ") :]))
+    if lowered.startswith("discover references "):
+        return "run_reference_discovery", parse_assignment_tokens(shlex.split(stripped[len("discover references ") :]))
     if any(phrase in lowered for phrase in ["show plan", "current plan", "plan summary", "what is the plan"]):
         return "get_plan", {}
     if lowered.startswith("restore revision "):

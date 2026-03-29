@@ -96,6 +96,7 @@ DeepPlan centers on one mutable plan plus supporting logs.
 - `plan`: the current structured planning state
 - `evidence`: concrete signals tied to planning axes
 - `hypothesis_log`: testable bets and outcomes
+- `reference_discoveries`: logged reference-search questions, criteria, and shortlisted candidates
 - `risks`: failure modes, early signals, mitigation
 - `revisions`: immutable plan snapshots over time
 - `events`: operational history such as auto-replan activity
@@ -165,6 +166,7 @@ python3 deepplan.py plan \
   --evolution-insights "How the plan evolves weekly"
 python3 deepplan.py qa
 python3 deepplan.py evidence --claim "Segment shows repeated pain" --source "interview-notes" --confidence 70 --axis market
+python3 deepplan.py discover --question "design agent examples" --context "Need GitHub references for product UX hierarchy" --references "repo-a,repo-b" --apply
 python3 deepplan.py hypothesis --hypothesis "Narrow segment will adopt weekly" --metric "weekly-active-pilot-users" --target ">=20" --window "14 days" --status open
 python3 deepplan.py show
 python3 deepplan.py history
@@ -178,6 +180,7 @@ DeepPlan is designed around explicit planning loops:
 
 - `plan`: define or overwrite core direction
 - `evidence`: add structured market/product signal
+- `discover`: structure reference search before adopting external patterns
 - `hypothesis`: track testable assumptions
 - `replan`: adjust execution-facing plan state from new evidence
 - `review`: inspect plan quality and next questions
@@ -230,6 +233,7 @@ Main commands:
 - `decide`: append a decision record
 - `risk`: append a risk record
 - `evidence`: append structured evidence
+- `discover`: generate or apply a reference-discovery pass
 - `hypothesis`: append structured hypothesis entries
 - `qa`: run QA checks manually
 - `validate`: validate plan structure and nested records
