@@ -1,0 +1,71 @@
+{
+  "id": "restore-roundtrip",
+  "description": "Previewing and restoring the previous revision should round-trip to the prior plan content.",
+  "seed_plan_first": {
+    "goal": "restore base"
+  },
+  "seed_plan_second": {
+    "goal": "restore target"
+  },
+  "assertions": [
+    {
+      "target": "preview",
+      "path": "status",
+      "op": "eq",
+      "value": 200
+    },
+    {
+      "target": "preview",
+      "path": "payload.selected_via",
+      "op": "eq",
+      "value": "previous"
+    },
+    {
+      "target": "preview",
+      "path": "payload.no_op",
+      "op": "eq",
+      "value": false
+    },
+    {
+      "target": "preview",
+      "path": "payload.metadata.goal",
+      "op": "eq",
+      "value": "restore base"
+    },
+    {
+      "target": "preview",
+      "path": "payload.change_count",
+      "op": "gt",
+      "value": 0
+    },
+    {
+      "target": "restored",
+      "path": "status",
+      "op": "eq",
+      "value": 200
+    },
+    {
+      "target": "restored",
+      "path": "payload.plan.goal",
+      "op": "eq",
+      "value": "restore base"
+    },
+    {
+      "target": "restored",
+      "path": "payload.restored_revision_id",
+      "op": "non_empty"
+    },
+    {
+      "target": "restored",
+      "path": "headers.ETag",
+      "op": "etag_matches_payload_fingerprint",
+      "fingerprint_path": "payload.fingerprint"
+    },
+    {
+      "target": "restored",
+      "path": "payload.fingerprint",
+      "op": "eq",
+      "value_from": "preview.payload.target_fingerprint"
+    }
+  ]
+}

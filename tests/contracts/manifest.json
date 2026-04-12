@@ -1,0 +1,25 @@
+{
+  "version": "0.1.0",
+  "cases": [
+    {
+      "id": "plan-envelope",
+      "file": "plan-envelope.json"
+    },
+    {
+      "id": "etag-fingerprint",
+      "file": "etag-fingerprint.json"
+    },
+    {
+      "id": "stale-write-conflict",
+      "file": "stale-write-conflict.json"
+    },
+    {
+      "id": "restore-roundtrip",
+      "file": "restore-roundtrip.json"
+    },
+    {
+      "id": "idempotent-evidence-dedupe",
+      "file": "idempotent-evidence-dedupe.json"
+    }
+  ]
+}

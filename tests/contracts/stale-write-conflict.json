@@ -1,0 +1,42 @@
+{
+  "id": "stale-write-conflict",
+  "description": "A stale If-Match must fail with 412 and expose the current fingerprint.",
+  "fresh_write_body": {
+    "goal": "fresh write"
+  },
+  "stale_write_body": {
+    "goal": "stale write"
+  },
+  "assertions": [
+    {
+      "target": "fresh",
+      "path": "status",
+      "op": "eq",
+      "value": 200
+    },
+    {
+      "target": "stale",
+      "path": "status",
+      "op": "eq",
+      "value": 412
+    },
+    {
+      "target": "stale",
+      "path": "payload.error",
+      "op": "eq",
+      "value": "plan fingerprint mismatch"
+    },
+    {
+      "target": "stale",
+      "path": "payload.current_fingerprint",
+      "op": "eq",
+      "value_from": "fresh.payload.fingerprint"
+    },
+    {
+      "target": "fresh",
+      "path": "headers.ETag",
+      "op": "etag_matches_payload_fingerprint",
+      "fingerprint_path": "payload.fingerprint"
+    }
+  ]
+}

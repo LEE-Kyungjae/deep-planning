@@ -1,0 +1,56 @@
+{
+  "id": "idempotent-evidence-dedupe",
+  "description": "Evidence writes with the same idempotency key replay without duplicating evidence entries.",
+  "first_evidence_body": {
+    "claim": "Repeated buyer pain",
+    "source": "pilot-call",
+    "confidence": 74,
+    "axis": "market",
+    "date": "2026-04-04",
+    "idempotency_key": "contract-evidence-1"
+  },
+  "assertions": [
+    {
+      "target": "first",
+      "path": "status",
+      "op": "eq",
+      "value": 200
+    },
+    {
+      "target": "second",
+      "path": "status",
+      "op": "eq",
+      "value": 200
+    },
+    {
+      "target": "first",
+      "path": "payload.idempotency_replayed",
+      "op": "eq",
+      "value": false
+    },
+    {
+      "target": "second",
+      "path": "payload.idempotency_replayed",
+      "op": "eq",
+      "value": true
+    },
+    {
+      "target": "second",
+      "path": "payload.plan.evidence",
+      "op": "len_eq",
+      "value": 1
+    },
+    {
+      "target": "second",
+      "path": "payload.plan.evidence.0.claim",
+      "op": "eq",
+      "value": "Repeated buyer pain"
+    },
+    {
+      "target": "first",
+      "path": "payload.fingerprint",
+      "op": "eq",
+      "value_from": "second.payload.fingerprint"
+    }
+  ]
+}

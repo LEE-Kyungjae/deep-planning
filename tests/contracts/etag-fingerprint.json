@@ -1,0 +1,35 @@
+{
+  "id": "etag-fingerprint",
+  "description": "Writes accepted with If-Match return a fresh fingerprint and matching ETag.",
+  "write_body": {
+    "goal": "etag contract",
+    "success_metric": "Keep contract intact",
+    "deadline": "2026-05-01"
+  },
+  "assertions": [
+    {
+      "target": "after",
+      "path": "status",
+      "op": "eq",
+      "value": 200
+    },
+    {
+      "target": "after",
+      "path": "payload.plan.goal",
+      "op": "eq",
+      "value": "etag contract"
+    },
+    {
+      "target": "after",
+      "path": "headers.ETag",
+      "op": "etag_matches_payload_fingerprint",
+      "fingerprint_path": "payload.fingerprint"
+    },
+    {
+      "target": "after",
+      "path": "payload.fingerprint",
+      "op": "ne",
+      "value_from": "before.payload.fingerprint"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "id": "plan-envelope",
+  "description": "GET /plan returns a stable envelope with plan, summary, validation, and fingerprint.",
+  "steps": [
+    {
+      "name": "read_plan",
+      "method": "GET",
+      "path": "/plan",
+      "capture": "plan"
+    }
+  ],
+  "assertions": [
+    {
+      "target": "plan",
+      "path": "status",
+      "op": "eq",
+      "value": 200
+    },
+    {
+      "target": "plan",
+      "path": "payload.ok",
+      "op": "eq",
+      "value": true
+    },
+    {
+      "target": "plan",
+      "path": "payload.tool_name",
+      "op": "eq",
+      "value": "get_plan"
+    },
+    {
+      "target": "plan",
+      "path": "payload.result_type",
+      "op": "eq",
+      "value": "plan"
+    },
+    {
+      "target": "plan",
+      "path": "payload",
+      "op": "has_keys",
+      "value": ["plan", "summary", "validation", "fingerprint", "contract_version", "implementation_version"]
+    },
+    {
+      "target": "plan",
+      "path": "payload.plan.schema_version",
+      "op": "eq",
+      "value_from": "plan.payload.contract_version"
+    },
+    {
+      "target": "plan",
+      "path": "payload.plan.version",
+      "op": "eq",
+      "value_from": "plan.payload.plan.schema_version"
+    },
+    {
+      "target": "plan",
+      "path": "headers.ETag",
+      "op": "etag_matches_payload_fingerprint",
+      "fingerprint_path": "payload.fingerprint"
+    }
+  ]
+}
