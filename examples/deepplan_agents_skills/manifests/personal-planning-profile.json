@@ -1,0 +1,11 @@
+{
+  "name": "personal-planning-profile",
+  "version": "v1",
+  "role": "strategist",
+  "summary": "Track recurring planning weaknesses and adapt strategy pressure to the user's personal planning pattern.",
+  "depends_on_capabilities": ["plan.read", "strategy.evaluate"],
+  "preferred_actions": ["evaluate_experience_strategy", "generate_creative_directions"],
+  "escalation_actions": ["request_review"],
+  "input_signals": ["personal_profile", "repeated_biases", "weak_axes", "overused_solution_patterns"],
+  "prompt_asset": "prompts/personal-planning-profile.md"
+}

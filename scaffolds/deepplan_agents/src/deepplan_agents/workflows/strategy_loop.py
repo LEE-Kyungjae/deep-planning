@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Protocol
 
 from deepplan_agents.adapters.deepplan_adapter import DeepPlanAdapter
 from deepplan_agents.runtime.decision_gate import evaluate_snapshot_gate
 from deepplan_agents.runtime.host_events import build_success_event
 from deepplan_agents.skills.registry import build_runtime_session
+from deepplan_agents.strategy_prompt import build_strategy_prompt_bundle
 
 
 GENERIC_TERMS = {
@@ -73,6 +74,10 @@ REPORT_REQUIRED_KEYS = [
     "next_actions",
     "positioning_rewrite",
     "monetization_moment",
+    "reference_insights",
+    "creative_directions",
+    "personal_profile_updates",
+    "project_context",
 ]
 
 REPORT_AXIS_KEYS = [
@@ -83,6 +88,11 @@ REPORT_AXIS_KEYS = [
     "anti_generic",
     "reference_insight",
 ]
+
+
+class StrategyProvider(Protocol):
+    def complete_json(self, *, messages: List[Dict[str, str]], schema: Dict[str, Any]) -> Dict[str, Any]:
+        ...
 
 
 def _text(payload: Dict[str, Any], *keys: str) -> str:
@@ -296,10 +306,53 @@ def validate_strategy_report_shape(report: Dict[str, Any]) -> List[str]:
     for key in ["positioning_rewrite", "monetization_moment"]:
         if not isinstance(report.get(key), str):
             errors.append(f"{key} must be a string")
+    reference_insights = report.get("reference_insights")
+    if not isinstance(reference_insights, list) or not all(isinstance(item, dict) for item in reference_insights):
+        errors.append("reference_insights must be an array of objects")
+    else:
+        required = {"source", "observed_behavior", "emotion_driver", "monetization_moment", "repeat_loop", "transferable_principle", "applied_to_plan"}
+        for index, item in enumerate(reference_insights):
+            missing = [key for key in sorted(required) if not isinstance(item.get(key), str)]
+            if missing:
+                errors.append(f"reference_insights[{index}] missing string fields: {', '.join(missing)}")
+    creative_directions = report.get("creative_directions")
+    if not isinstance(creative_directions, list) or not all(isinstance(item, dict) for item in creative_directions):
+        errors.append("creative_directions must be an array of objects")
+    else:
+        required = {"name", "target_user", "problem", "experience_loop", "emotional_wedge", "monetization_trigger", "reference_basis", "why_not_generic"}
+        for index, item in enumerate(creative_directions):
+            missing = [key for key in sorted(required) if not isinstance(item.get(key), str)]
+            if missing:
+                errors.append(f"creative_directions[{index}] missing string fields: {', '.join(missing)}")
+    personal_updates = report.get("personal_profile_updates")
+    if not isinstance(personal_updates, dict):
+        errors.append("personal_profile_updates must be an object")
+    else:
+        for key in ["repeated_biases", "weak_axes", "overused_solution_patterns", "recommended_next_prompts"]:
+            value = personal_updates.get(key)
+            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                errors.append(f"personal_profile_updates.{key} must be an array of strings")
+    project_context = report.get("project_context")
+    if not isinstance(project_context, dict):
+        errors.append("project_context must be an object")
+    else:
+        for key in ["entry_mode", "stage", "existing_artifacts_used", "mid_project_risks"]:
+            value = project_context.get(key)
+            if key in {"existing_artifacts_used", "mid_project_risks"}:
+                if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                    errors.append(f"project_context.{key} must be an array of strings")
+            elif not isinstance(value, str):
+                errors.append(f"project_context.{key} must be a string")
     return errors
 
 
 def evaluate_strategy_payload(payload: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Legacy fixture generator for tests.
+
+    Product strategy execution must use an AI provider through StrategyLoop.
+    This helper stays deterministic so tests can build valid report fixtures
+    without making network or model calls.
+    """
     idea_text = _text(
         payload,
         "idea",
@@ -396,6 +449,43 @@ def evaluate_strategy_payload(payload: Dict[str, Any], plan: Dict[str, Any]) -> 
         ),
         "positioning_rewrite": positioning_rewrite,
         "monetization_moment": _monetization_moment(payload, emotion_hits),
+        "reference_insights": [
+            {
+                "source": str(item),
+                "observed_behavior": "Needs AI extraction from the referenced behavior source.",
+                "emotion_driver": ", ".join(emotion_hits) if emotion_hits else "unknown",
+                "monetization_moment": str(payload.get("monetization", "")).strip(),
+                "repeat_loop": str(payload.get("repeat_loop", "")).strip(),
+                "transferable_principle": "Use this only as a test fixture; product execution must use AI extraction.",
+                "applied_to_plan": positioning_rewrite,
+            }
+            for item in payload.get("references", [])
+            if str(item).strip()
+        ],
+        "creative_directions": [
+            {
+                "name": "AI provider required",
+                "target_user": str(payload.get("target_user", "")).strip(),
+                "problem": str(payload.get("problem", "")).strip(),
+                "experience_loop": str(payload.get("repeat_loop", "")).strip(),
+                "emotional_wedge": ", ".join(emotion_hits) if emotion_hits else str(payload.get("emotion", "")).strip(),
+                "monetization_trigger": str(payload.get("monetization", "")).strip(),
+                "reference_basis": ", ".join(str(item) for item in payload.get("references", []) if str(item).strip()),
+                "why_not_generic": str(payload.get("differentiation", "")).strip(),
+            }
+        ],
+        "personal_profile_updates": {
+            "repeated_biases": ["AI extraction required"],
+            "weak_axes": [key for key, missing_items in missing.items() if missing_items],
+            "overused_solution_patterns": generic_hits,
+            "recommended_next_prompts": research_questions[:3],
+        },
+        "project_context": {
+            "entry_mode": str(payload.get("entry_mode", "")).strip() or "new_project",
+            "stage": str(payload.get("project_stage", "")).strip() or "unknown",
+            "existing_artifacts_used": [str(item) for item in payload.get("existing_artifacts", []) if str(item).strip()],
+            "mid_project_risks": [str(item) for item in payload.get("pivot_signals", []) if str(item).strip()],
+        },
     }
     errors = validate_strategy_report_shape(report)
     if errors:
@@ -407,13 +497,21 @@ def evaluate_strategy_payload(payload: Dict[str, Any], plan: Dict[str, Any]) -> 
 class StrategyLoop:
     adapter: DeepPlanAdapter
     role: str = "strategist"
+    provider: Optional[StrategyProvider] = None
 
-    def run_once(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def run_once(self, payload: Dict[str, Any], *, action_name: str = "evaluate_experience_strategy") -> Dict[str, Any]:
         before = self.adapter.snapshot()
         session = build_runtime_session(self.role)
         preflight = evaluate_snapshot_gate(before)
-        plan = before.get("plan", {}) if isinstance(before.get("plan"), dict) else {}
-        strategy = evaluate_strategy_payload(payload, plan)
+        if self.provider is None:
+            raise ValueError("evaluate_experience_strategy requires an AI strategy provider")
+        bundle = build_strategy_prompt_bundle(payload, before, action=action_name)
+        strategy = self.provider.complete_json(messages=bundle["messages"], schema=bundle["schema"])
+        if not isinstance(strategy, dict):
+            raise ValueError("AI strategy provider must return a JSON object")
+        errors = validate_strategy_report_shape(strategy)
+        if errors:
+            raise ValueError("invalid AI strategy report: " + "; ".join(errors))
         gate = {
             "decision": strategy["decision"],
             "reasons": list(strategy["risks"]),
@@ -425,7 +523,7 @@ class StrategyLoop:
             "preflight": preflight,
             "result": {"strategy": strategy, "payload": payload},
             "summary": {
-                "operation": "evaluate_experience_strategy",
+                "operation": action_name,
                 "fingerprint": str(before.get("fingerprint", "")).strip(),
                 "changed_fields": [],
                 "qa_result": str(before.get("qa", {}).get("result", "")).strip() if isinstance(before.get("qa"), dict) else "",
@@ -437,5 +535,5 @@ class StrategyLoop:
             "gate": gate,
         }
 
-    def run_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return build_success_event("strategy_step", self.run_once(payload))
+    def run_event(self, payload: Dict[str, Any], *, action_name: str = "evaluate_experience_strategy") -> Dict[str, Any]:
+        return build_success_event("strategy_step", self.run_once(payload, action_name=action_name))

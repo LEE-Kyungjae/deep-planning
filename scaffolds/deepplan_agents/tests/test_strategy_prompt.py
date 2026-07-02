@@ -25,6 +25,7 @@ class DeepPlanStrategyPromptTests(unittest.TestCase):
         self.assertEqual(schema["title"], "DeepPlanStrategyReport")
         self.assertEqual(bundle["messages"][0]["role"], "system")
         self.assertIn("idea_payload", bundle["messages"][1]["content"])
+        self.assertIn("evaluate_experience_strategy", bundle["messages"][1]["content"])
         self.assertIn("required_output_schema", bundle["messages"][1]["content"])
 
     def test_compact_strategy_snapshot_removes_verbose_health_logs(self):
@@ -50,6 +51,25 @@ class DeepPlanStrategyPromptTests(unittest.TestCase):
         self.assertNotIn("execution_tasks", compact["plan"])
         self.assertEqual(compact["qa"]["failed_checks"][0]["name"], "bad")
         self.assertNotIn("logs", compact["health"])
+
+    def test_creative_prompt_supports_mid_project_entry_context(self):
+        bundle = build_strategy_prompt_bundle(
+            {
+                "topic": "Recover a generic AI prototype",
+                "entry_mode": "mid_project",
+                "project_stage": "prototype",
+                "existing_artifacts": ["README", "usage notes", "competitor review"],
+                "pivot_signals": ["users do not return after first session"],
+            },
+            {"plan": {"goal": "Improve product direction"}, "qa": {"result": "PASS"}, "health": {"status": "ok"}},
+            action="generate_creative_directions",
+        )
+
+        content = bundle["messages"][1]["content"]
+        self.assertIn("generate_creative_directions", content)
+        self.assertIn("mid_project", content)
+        self.assertIn("existing_artifacts", content)
+        self.assertIn("project_context", content)
 
 
 if __name__ == "__main__":

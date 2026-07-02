@@ -67,6 +67,7 @@ def role_has_action_capabilities(role: str, action: str) -> bool:
 class HostStep:
     adapter: DeepPlanAdapter
     role: str = "planner"
+    strategy_provider: Any = None
 
     def _normalize_input(self, host_input: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(host_input, dict):
@@ -144,8 +145,8 @@ class HostStep:
 
             if action == "update_plan":
                 return PlannerLoop(self.adapter, role=self.role).run_event(payload)
-            if action == "evaluate_experience_strategy":
-                return StrategyLoop(self.adapter, role=self.role).run_event(payload)
+            if action in {"evaluate_experience_strategy", "generate_creative_directions"}:
+                return StrategyLoop(self.adapter, role=self.role, provider=self.strategy_provider).run_event(payload, action_name=action)
             if action == "capture_evidence_cycle":
                 return ResearchLoop(self.adapter, role=self.role).run_event(payload, session_id=session_id, step_id=step_id)
             if action == "run_reference_discovery":

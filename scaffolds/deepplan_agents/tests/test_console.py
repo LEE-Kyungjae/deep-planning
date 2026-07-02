@@ -108,7 +108,7 @@ class DeepPlanAgentsConsoleTests(unittest.TestCase):
         self.assertEqual(event["summary"]["operation"], "update_plan")
         self.assertIn("goal", event["summary"]["changed_fields"])
 
-    def test_strategist_evaluates_experience_strategy(self):
+    def test_strategist_run_requires_ai_provider(self):
         with DeepPlanStateIsolation():
             code, event = run_console(
                 [
@@ -122,16 +122,32 @@ class DeepPlanAgentsConsoleTests(unittest.TestCase):
                 ]
             )
 
+        self.assertEqual(code, 1)
+        self.assertFalse(event["ok"])
+        self.assertEqual(event["type"], "host_step_failed")
+        self.assertIn("requires an AI strategy provider", event["error"]["message"])
+
+    def test_strategist_run_accepts_injected_static_provider(self):
+        with DeepPlanStateIsolation():
+            code, event = run_console(
+                [
+                    "run",
+                    "--role",
+                    "strategist",
+                    "--action",
+                    "generate_creative_directions",
+                    "--provider",
+                    "static",
+                    "--static-report-json",
+                    json.dumps(VALID_REPORT),
+                ]
+            )
+
         self.assertEqual(code, 0)
         self.assertTrue(event["ok"])
         self.assertEqual(event["type"], "strategy_step")
-        self.assertEqual(event["summary"]["operation"], "evaluate_experience_strategy")
-        self.assertIn("generic_llm_service_pattern", event["gate"]["reasons"])
-        self.assertIn("research_questions", event["result"]["strategy"])
-        self.assertIn("positioning_rewrite", event["result"]["strategy"])
-        self.assertIn("next_actions", event["result"]["strategy"])
-        self.assertEqual(event["result"]["strategy"]["next_actions"][0]["target_role"], "researcher")
-        self.assertEqual(event["result"]["strategy"]["next_actions"][0]["action"], "run_reference_discovery")
+        self.assertEqual(event["summary"]["operation"], "generate_creative_directions")
+        self.assertEqual(event["result"]["strategy"]["creative_directions"][0]["name"], "Pre-build Strategy Gate")
 
     def test_prompt_builds_strategy_llm_bundle_without_provider_call(self):
         with DeepPlanStateIsolation():
@@ -148,11 +164,22 @@ class DeepPlanAgentsConsoleTests(unittest.TestCase):
         self.assertIn("overall_score", schema["required"])
         self.assertIn("next_actions", schema["required"])
 
+    def test_prompt_builds_creative_directions_bundle(self):
+        with DeepPlanStateIsolation():
+            code, payload = run_console(["prompt", "--action", "generate_creative_directions"])
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertIn("generate_creative_directions", payload["bundle"]["messages"][1]["content"])
+        self.assertIn("mid_project", payload["bundle"]["messages"][1]["content"])
+
     def test_llm_runs_static_strategy_provider(self):
         with DeepPlanStateIsolation():
             code, payload = run_console(
                 [
                     "llm",
+                    "--provider",
+                    "static",
                     "--static-report-json",
                     json.dumps(VALID_REPORT),
                 ]
@@ -162,6 +189,24 @@ class DeepPlanAgentsConsoleTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["type"], "strategy_llm_report")
         self.assertEqual(payload["report"]["decision"], "revise_before_build")
+
+    def test_llm_runs_static_creative_strategy_provider(self):
+        with DeepPlanStateIsolation():
+            code, payload = run_console(
+                [
+                    "llm",
+                    "--action",
+                    "generate_creative_directions",
+                    "--provider",
+                    "static",
+                    "--static-report-json",
+                    json.dumps(VALID_REPORT),
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["report"]["creative_directions"][0]["name"], "Pre-build Strategy Gate")
 
     def test_route_validates_strategy_next_actions(self):
         with DeepPlanStateIsolation():

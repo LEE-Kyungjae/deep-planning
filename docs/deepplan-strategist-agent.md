@@ -14,6 +14,9 @@ The stronger product direction is:
 - prevent LLM agents from producing average AI wrappers
 - convert ideas into monetizable user experience loops
 - use external behavior references as creative raw material
+- generate non-generic directions by recombining reference patterns
+- adapt critique to the user's repeated planning weaknesses
+- enter an already-started project without assuming a clean slate
 - preserve the planning state, evidence, and revision trail in DeepPlan
 
 The strategist agent is the layer that turns this into an operating loop.
@@ -50,6 +53,9 @@ The strategist evaluates ideas through these axes:
 | Monetization Trigger | What exact moment makes payment feel natural or urgent? |
 | Anti-Generic | Is this just another AI dashboard, todo app, CRM, assistant, or productivity wrapper? |
 | Reference-to-Insight | Which behavior data, papers, reviews, success cases, or failure cases created the insight? |
+| Creative Recombination | Which transferable behavior principles can become non-obvious product directions? |
+| Personal Profile | Which repeated planning weakness should the strategist compensate for next time? |
+| Project Context | Is this a new project, mid-project rescue, pivot, or continuation decision? |
 | Risk Boundary | Does the loop rely on exploitation, toxic conflict, resentment, or fragile trust? |
 
 ## Product Loop
@@ -69,28 +75,72 @@ The strategist does not replace DeepPlan's kernel.
 It reads the current plan, produces a strategy report, and may request review.
 It should not bypass host capabilities or mutate plan state directly.
 
-## First Runnable Scaffold
+## First AI-First Scaffold
 
 The scaffold includes:
 
 - role: `strategist`
 - profile: `strategist_product`
-- action: `evaluate_experience_strategy`
+- actions:
+  - `evaluate_experience_strategy`
+  - `generate_creative_directions`
 - skills:
   - `problem-solution-pressure`
   - `desire-emotion-map`
   - `experience-loop-design`
   - `anti-generic-insight`
   - `reference-to-insight`
+  - `creative-recombination`
+  - `personal-planning-profile`
+  - `mid-project-intake`
 
-Run it locally:
+Build the AI prompt bundle locally:
 
 ```bash
+PYTHONPATH=scaffolds/deepplan_agents/src \
+python3 -m deepplan_agents.console prompt \
+  --payload-json '{"idea":"AI productivity dashboard","target_user":"solo builder","solution":"dashboard"}'
+```
+
+The host must inject an AI strategy provider before running `evaluate_experience_strategy`.
+The strategist execution path should not fall back to rule-based scoring.
+Deterministic code is allowed only for prompt construction, JSON schema validation, route validation, and provider mocks in tests.
+
+Run with a real OpenAI provider:
+
+```bash
+OPENAI_API_KEY=... \
 PYTHONPATH=scaffolds/deepplan_agents/src \
 python3 -m deepplan_agents.console run \
   --role strategist \
   --action evaluate_experience_strategy \
-  --payload-json '{"idea":"AI productivity dashboard","target_user":"solo builder","solution":"dashboard"}'
+  --provider openai
+```
+
+The default OpenAI model is `gpt-5.5`.
+Set `--model` or `DEEPPLAN_OPENAI_MODEL` to override it.
+The provider uses structured JSON output and validates the result against the local strategy report schema before the host consumes it.
+
+For creative direction generation:
+
+```bash
+PYTHONPATH=scaffolds/deepplan_agents/src \
+python3 -m deepplan_agents.console prompt \
+  --action generate_creative_directions
+```
+
+This action is for zero-to-one ideation and mid-project rescue or pivot work.
+It accepts `entry_mode`, `project_stage`, `existing_artifacts`, `current_plan`, `constraints`, `pivot_signals`, references, behavior signals, and a `personal_profile`.
+
+Run creative direction generation with a real provider:
+
+```bash
+OPENAI_API_KEY=... \
+PYTHONPATH=scaffolds/deepplan_agents/src \
+python3 -m deepplan_agents.console run \
+  --role strategist \
+  --action generate_creative_directions \
+  --provider openai
 ```
 
 Expected behavior:
@@ -106,7 +156,7 @@ Expected behavior:
 
 ## Strategy Report Shape
 
-The first scaffold returns a deterministic report with these fields:
+The AI strategist must return a structured report with these fields:
 
 - `overall_score`
 - `decision`
@@ -121,9 +171,24 @@ The first scaffold returns a deterministic report with these fields:
 - `next_actions`
 - `positioning_rewrite`
 - `monetization_moment`
+- `reference_insights`
+- `creative_directions`
+- `personal_profile_updates`
+- `project_context`
 
-The future LLM-backed strategist should preserve this shape.
-The model can improve judgment quality, but hosts should still receive stable fields that can drive gates.
+The model owns judgment quality.
+Hosts own deterministic validation of the report shape, next-action routes, and capability boundaries.
+
+`reference_insights` is the key creativity bridge.
+Each item converts a source into observed behavior, emotion driver, monetization moment, repeat loop, transferable principle, and application to the current plan.
+
+`creative_directions` recombines those principles into non-generic product directions.
+This is where DeepPlan should fight the common LLM failure mode of producing the same dashboard, assistant, todo, CRM, or productivity shell.
+
+`personal_profile_updates` lets DeepPlan adapt over time to the user's planning pattern, such as repeatedly starting from implementation, skipping reference evidence, or overusing dashboard-shaped solutions.
+
+`project_context` keeps DeepPlan useful after a project has already started.
+Mid-project analysis should use current artifacts, constraints, traction, pivot signals, and sunk-cost pressure instead of pretending the user is at day zero.
 
 `next_actions` is the bridge from judgment to execution.
 The strategist does not execute actions directly.
@@ -141,9 +206,9 @@ Each next action includes:
 - `reason`
 - `payload`
 
-## LLM Reasoning Contract
+## AI Reasoning Contract
 
-The scaffold now includes a provider-neutral prompt bundle for the future LLM strategist:
+The scaffold includes a provider-neutral prompt bundle for the strategist:
 
 - system prompt: `scaffolds/deepplan_agents/src/deepplan_agents/prompts/strategist-system.md`
 - output schema: `scaffolds/deepplan_agents/src/deepplan_agents/schemas/strategy-report.schema.json`
@@ -156,7 +221,7 @@ The prompt bundle includes:
 - the current DeepPlan snapshot
 - the required JSON schema
 
-Generate it without calling a model:
+Generate the prompt bundle without calling a model:
 
 ```bash
 PYTHONPATH=scaffolds/deepplan_agents/src \
@@ -164,7 +229,7 @@ python3 -m deepplan_agents.console prompt
 ```
 
 This keeps provider integration separate from the product reasoning contract.
-Any future OpenAI, local model, or hosted agent adapter should preserve the same report shape.
+Any OpenAI, local model, or hosted agent adapter should preserve the same report shape.
 
 The provider boundary is intentionally small:
 
@@ -174,14 +239,15 @@ class StrategyLLMProvider(Protocol):
         ...
 ```
 
-That means the first real adapter only needs to:
+That means a real adapter only needs to:
 
 1. receive the prompt messages and report schema
 2. call the model with structured JSON output
 3. return a JSON object
 4. let `run_strategy_llm` validate the report shape before the host consumes it
 
-The scaffold includes a static provider for tests and local contract checks.
+The scaffold includes a static provider only for tests and local contract checks.
+It is a provider mock, not a product judgment fallback.
 
 ## Routing Next Actions
 

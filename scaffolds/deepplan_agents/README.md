@@ -12,7 +12,8 @@ It demonstrates:
 - a runnable `deepplan-agents` console for immediate local agent steps
 - a minimal DeepPlan adapter surface
 - one-step planner / researcher / reviewer loops
-- one-step strategist loop for problem-solution, emotion, experience, monetization, reference-insight, and anti-generic evaluation
+- AI-provider-backed strategist loop for problem-solution, emotion, experience, monetization, reference-insight, creative direction, personal profile, and anti-generic evaluation
+- OpenAI Responses provider boundary for structured JSON strategy reports
 - shared runtime decision gates for `qa` and `health`
 - runtime idempotency key and stale conflict retry policies
 - host-facing event envelopes for workflow outputs
@@ -20,7 +21,6 @@ It demonstrates:
 
 This scaffold does not include:
 
-- provider integration
 - queue workers
 - network services
 - execution runtimes
@@ -33,10 +33,28 @@ Run directly from the scaffold without installing:
 PYTHONPATH=scaffolds/deepplan_agents/src python3 -m deepplan_agents.console agents
 PYTHONPATH=scaffolds/deepplan_agents/src python3 -m deepplan_agents.console snapshot
 PYTHONPATH=scaffolds/deepplan_agents/src python3 -m deepplan_agents.console run --role planner --action update_plan
-PYTHONPATH=scaffolds/deepplan_agents/src python3 -m deepplan_agents.console run --role strategist --action evaluate_experience_strategy
 PYTHONPATH=scaffolds/deepplan_agents/src python3 -m deepplan_agents.console prompt
+PYTHONPATH=scaffolds/deepplan_agents/src python3 -m deepplan_agents.console prompt --action generate_creative_directions
 PYTHONPATH=scaffolds/deepplan_agents/src python3 -m deepplan_agents.console run --role researcher --action capture_evidence_cycle --session-id local --step-id research-1
 PYTHONPATH=scaffolds/deepplan_agents/src python3 -m deepplan_agents.console run --role reviewer --action request_review --session-id local --step-id review-1
+```
+
+Strategist execution requires an AI provider:
+
+```bash
+OPENAI_API_KEY=... \
+PYTHONPATH=scaffolds/deepplan_agents/src \
+python3 -m deepplan_agents.console run \
+  --role strategist \
+  --action evaluate_experience_strategy \
+  --provider openai
+
+OPENAI_API_KEY=... \
+PYTHONPATH=scaffolds/deepplan_agents/src \
+python3 -m deepplan_agents.console run \
+  --role strategist \
+  --action generate_creative_directions \
+  --provider openai
 ```
 
 Or install the package and use the console script:

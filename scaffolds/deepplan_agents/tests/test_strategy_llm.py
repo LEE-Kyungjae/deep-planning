@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -9,7 +10,7 @@ SRC_ROOT = SCAFFOLD_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from deepplan_agents.strategy_llm import StaticStrategyProvider, run_strategy_llm
+from deepplan_agents.strategy_llm import OpenAIResponsesStrategyProvider, StaticStrategyProvider, run_strategy_llm
 
 
 VALID_REPORT = {
@@ -41,6 +42,41 @@ VALID_REPORT = {
     ],
     "positioning_rewrite": "Reframe as pre-build product intelligence.",
     "monetization_moment": "Charge when the user avoids wasted build time.",
+    "reference_insights": [
+        {
+            "source": "failed AI wrapper launches",
+            "observed_behavior": "Builders ship similar tools before proving demand.",
+            "emotion_driver": "fear/control",
+            "monetization_moment": "Before expensive build time starts.",
+            "repeat_loop": "Every new idea goes through the gate.",
+            "transferable_principle": "Convert pre-build anxiety into a paid decision checkpoint.",
+            "applied_to_plan": "Make the product a strategy gate, not a dashboard.",
+        }
+    ],
+    "creative_directions": [
+        {
+            "name": "Pre-build Strategy Gate",
+            "target_user": "solo AI builders",
+            "problem": "They cannot tell generic AI ideas from emotionally demanded services.",
+            "experience_loop": "Idea trigger, pressure test, sharper direction, repeat for every build.",
+            "emotional_wedge": "anxiety relief and control",
+            "monetization_trigger": "The moment before coding begins.",
+            "reference_basis": "failed AI wrapper launches",
+            "why_not_generic": "It kills weak build requests instead of generating another app shell.",
+        }
+    ],
+    "personal_profile_updates": {
+        "repeated_biases": ["starts from solution before behavior evidence"],
+        "weak_axes": ["reference_insight"],
+        "overused_solution_patterns": ["dashboard"],
+        "recommended_next_prompts": ["Bring three behavior references before asking for a build."],
+    },
+    "project_context": {
+        "entry_mode": "new_project",
+        "stage": "pre-build",
+        "existing_artifacts_used": [],
+        "mid_project_risks": [],
+    },
 }
 
 
@@ -56,6 +92,37 @@ class DeepPlanStrategyLLMTests(unittest.TestCase):
         self.assertEqual(result["type"], "strategy_llm_report")
         self.assertEqual(result["prompt"]["schema_title"], "DeepPlanStrategyReport")
         self.assertEqual(result["report"]["decision"], "revise_before_build")
+
+    def test_openai_provider_uses_responses_json_schema(self):
+        class FakeResponses:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def create(self, **kwargs):
+                self.calls.append(kwargs)
+
+                class Response:
+                    output_text = json.dumps(VALID_REPORT)
+
+                return Response()
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.responses = FakeResponses()
+
+        client = FakeClient()
+        provider = OpenAIResponsesStrategyProvider(model="test-model", client=client)
+        report = provider.complete_json(
+            messages=[{"role": "system", "content": "system"}, {"role": "user", "content": "user"}],
+            schema={"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"},
+        )
+
+        self.assertEqual(report["decision"], "revise_before_build")
+        call = client.responses.calls[0]
+        self.assertEqual(call["model"], "test-model")
+        self.assertEqual(call["text"]["format"]["type"], "json_schema")
+        self.assertTrue(call["text"]["format"]["strict"])
+        self.assertNotIn("$schema", call["text"]["format"]["schema"])
 
     def test_run_strategy_llm_rejects_invalid_provider_report(self):
         with self.assertRaises(ValueError) as ctx:

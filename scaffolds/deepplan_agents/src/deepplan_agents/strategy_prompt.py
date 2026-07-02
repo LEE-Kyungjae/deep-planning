@@ -42,6 +42,8 @@ def _compact_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         "evidence",
         "hypothesis_log",
         "risks",
+        "plan_tasks",
+        "definition_of_done",
     ]
     compact: Dict[str, Any] = {}
     for key in keys:
@@ -84,12 +86,13 @@ def compact_strategy_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def build_strategy_messages(payload: Dict[str, Any], snapshot: Dict[str, Any]) -> List[Dict[str, str]]:
+def build_strategy_messages(payload: Dict[str, Any], snapshot: Dict[str, Any], *, action: str = "evaluate_experience_strategy") -> List[Dict[str, str]]:
     if not isinstance(payload, dict):
         raise ValueError("payload must be an object")
     if not isinstance(snapshot, dict):
         raise ValueError("snapshot must be an object")
     context = {
+        "action": action,
         "idea_payload": payload,
         "deepplan_snapshot": compact_strategy_snapshot(snapshot),
         "required_output_schema": load_strategy_report_schema(),
@@ -103,8 +106,8 @@ def build_strategy_messages(payload: Dict[str, Any], snapshot: Dict[str, Any]) -
     ]
 
 
-def build_strategy_prompt_bundle(payload: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+def build_strategy_prompt_bundle(payload: Dict[str, Any], snapshot: Dict[str, Any], *, action: str = "evaluate_experience_strategy") -> Dict[str, Any]:
     return {
-        "messages": build_strategy_messages(payload, snapshot),
+        "messages": build_strategy_messages(payload, snapshot, action=action),
         "schema": load_strategy_report_schema(),
     }

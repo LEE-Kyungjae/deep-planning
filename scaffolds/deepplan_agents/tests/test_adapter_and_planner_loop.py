@@ -15,6 +15,7 @@ from deepplan_agents.runtime.decision_gate import evaluate_cycle_gate, evaluate_
 from deepplan_agents.runtime.host_events import build_error_event, build_success_event, summarize_for_host
 from deepplan_agents.runtime.host_step import HostStep, action_contract, required_capabilities_for_action, role_has_action_capabilities
 from deepplan_agents.runtime.policies import apply_idempotency_policy, build_idempotency_key, should_retry_stale_conflict
+from deepplan_agents.strategy_llm import StaticStrategyProvider
 from deepplan_agents.workflows.planner_loop import PlannerLoop
 from deepplan_agents.workflows.research_loop import ResearchLoop
 from deepplan_agents.workflows.review_loop import ReviewLoop
@@ -446,8 +447,6 @@ class PlannerLoopTests(unittest.TestCase):
     def test_strategy_loop_flags_generic_ideas_before_build(self):
         client = FakeDeepPlanClient()
         adapter = DeepPlanAdapter(client, history_limit=4, require_healthy_writes=True)
-        loop = StrategyLoop(adapter)
-
         report = evaluate_strategy_payload(
             {
                 "idea": "AI productivity dashboard and assistant",
@@ -456,6 +455,7 @@ class PlannerLoopTests(unittest.TestCase):
             },
             {"goal": "Build another AI tool"},
         )
+        loop = StrategyLoop(adapter, provider=StaticStrategyProvider(report))
         event = loop.run_event(
             {
                 "idea": "AI productivity dashboard and assistant",

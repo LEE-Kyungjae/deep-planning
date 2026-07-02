@@ -205,6 +205,12 @@ Start with a small set of reusable skills.
   Detect generic LLM-built service patterns such as another AI wrapper, dashboard, todo, CRM, or productivity assistant.
 - `reference-to-insight`
   Extract behavior patterns, monetization moments, and transferable creative insights from papers, reviews, failures, and successful services.
+- `creative-recombination`
+  Generate non-generic product directions by transferring behavior patterns from references across domains.
+- `personal-planning-profile`
+  Track repeated planning weaknesses, weak axes, and overused solution patterns for the current user.
+- `mid-project-intake`
+  Let DeepPlan enter an already-started project using existing artifacts, constraints, traction, and pivot signals.
 
 ### Reviewer Skills
 
@@ -227,7 +233,8 @@ Recommended initial mapping:
 | `plan.read` | `plan-framing`, `qa-recovery`, `review-triage`, `restore-safety` |
 | `plan.write` | `plan-framing`, `qa-recovery` |
 | `evidence.append_and_replan` | `evidence-capture`, `reference-discovery` |
-| `strategy.evaluate` | `problem-solution-pressure`, `desire-emotion-map`, `experience-loop-design`, `anti-generic-insight`, `reference-to-insight` |
+| `strategy.evaluate` | `problem-solution-pressure`, `desire-emotion-map`, `experience-loop-design`, `anti-generic-insight`, `reference-to-insight`, `personal-planning-profile`, `mid-project-intake` |
+| `strategy.generate` | `creative-recombination`, `reference-to-insight` |
 | `review.request` | `human-handoff`, `boundary-awareness`, `decision-closure` |
 | `review.resolve` | `decision-closure`, `review-triage` |
 | `plan.restore` | `restore-safety` |

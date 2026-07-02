@@ -62,7 +62,15 @@
       "description": "Evaluate whether an idea has strong problem-solution, desire, experience-loop, monetization, differentiation, and reference-insight structure.",
       "required_capabilities": ["plan.read", "strategy.evaluate"],
       "payload_required": true,
-      "payload_keys": ["idea", "target_user", "problem", "current_alternative", "pain_frequency", "solution", "desire", "emotion", "trigger", "action", "reward", "references", "behavior_signals", "monetization", "repeat_loop", "differentiation"],
+      "payload_keys": ["idea", "entry_mode", "project_stage", "existing_artifacts", "pivot_signals", "target_user", "problem", "current_alternative", "pain_frequency", "solution", "desire", "emotion", "trigger", "action", "reward", "references", "behavior_signals", "monetization", "repeat_loop", "differentiation", "personal_profile"],
+      "options": ["history_limit"]
+    },
+    {
+      "action": "generate_creative_directions",
+      "description": "Use AI to transform references, behavior signals, and personal planning profile into non-generic product directions for new or mid-project planning.",
+      "required_capabilities": ["plan.read", "strategy.generate"],
+      "payload_required": true,
+      "payload_keys": ["topic", "entry_mode", "project_stage", "existing_artifacts", "current_plan", "constraints", "pivot_signals", "references", "behavior_signals", "success_cases", "failure_cases", "papers", "reviews", "personal_profile"],
       "options": ["history_limit"]
     }
   ],
@@ -72,8 +80,8 @@
       "allowed_actions": ["update_plan", "capture_evidence_cycle", "request_review", "resolve_review", "preview_restore_previous", "restore_previous"]
     },
     "strategist_product": {
-      "capabilities": ["plan.read", "strategy.evaluate", "review.request"],
-      "allowed_actions": ["evaluate_experience_strategy", "request_review", "preview_restore_previous"]
+      "capabilities": ["plan.read", "strategy.evaluate", "strategy.generate", "review.request"],
+      "allowed_actions": ["evaluate_experience_strategy", "generate_creative_directions", "request_review", "preview_restore_previous"]
     },
     "researcher_capture": {
       "capabilities": ["plan.read", "evidence.append_and_replan", "reference.discover", "review.request"],

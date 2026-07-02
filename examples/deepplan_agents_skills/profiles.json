@@ -6,7 +6,7 @@
     },
     "strategist_product": {
       "role": "strategist",
-      "default_skills": ["problem-solution-pressure", "desire-emotion-map", "experience-loop-design", "anti-generic-insight", "reference-to-insight", "human-handoff"]
+      "default_skills": ["problem-solution-pressure", "desire-emotion-map", "experience-loop-design", "anti-generic-insight", "reference-to-insight", "creative-recombination", "personal-planning-profile", "mid-project-intake", "human-handoff"]
     },
     "researcher_capture": {
       "role": "researcher",

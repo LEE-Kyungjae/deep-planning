@@ -9,7 +9,7 @@ from deepplan_agents.adapters.deepplan_adapter import DeepPlanAdapter
 from deepplan_agents.bootstrap import ClientConfig, build_client
 from deepplan_agents.runtime.host_step import HostStep, action_contract
 from deepplan_agents.skills.registry import build_runtime_session
-from deepplan_agents.strategy_llm import run_strategy_llm, static_provider_from_json
+from deepplan_agents.strategy_llm import openai_provider_from_env, run_strategy_llm, static_provider_from_json
 from deepplan_agents.strategy_prompt import build_strategy_prompt_bundle
 from deepplan_agents.strategy_routes import route_strategy_next_actions
 
@@ -17,6 +17,10 @@ from deepplan_agents.strategy_routes import route_strategy_next_actions
 DEFAULT_PAYLOADS: Dict[str, Dict[str, Any]] = {
     "evaluate_experience_strategy": {
         "idea": "AI planning checkpoint for builders before they ask agents to build.",
+        "entry_mode": "new_project",
+        "project_stage": "pre-build",
+        "existing_artifacts": [],
+        "pivot_signals": [],
         "target_user": "solo AI builders and early founders",
         "problem": "They build generic services quickly before validating problem, desire, differentiation, and repeat value.",
         "current_alternative": "They ask a coding agent to build immediately or use generic planning prompts.",
@@ -31,7 +35,32 @@ DEFAULT_PAYLOADS: Dict[str, Dict[str, Any]] = {
         "repeat_loop": "review each new idea, weekly planning cycle, and post-launch evidence cycle",
         "references": ["successful service loops", "failed AI wrappers", "user behavior data"],
         "behavior_signals": ["users ask AI agents for the same dashboards and AI wrappers", "successful services convert emotional demand into repeat behavior"],
-        "differentiation": "pre-build product intelligence rather than another task or notes tool"
+        "differentiation": "pre-build product intelligence rather than another task or notes tool",
+        "personal_profile": {
+            "repeated_biases": ["solution-first planning"],
+            "weak_axes": ["reference_insight"],
+            "overused_solution_patterns": ["dashboard"]
+        }
+    },
+    "generate_creative_directions": {
+        "topic": "DeepPlan product intelligence for AI builders",
+        "entry_mode": "mid_project",
+        "project_stage": "prototype with a planning kernel and strategist scaffold",
+        "existing_artifacts": ["current plan", "strategy prompt", "host action contract", "reference discovery loop"],
+        "current_plan": "Shift from plan-state kernel to AI-first product intelligence that attacks weak ideas before build.",
+        "constraints": ["DeepPlan remains plan-only", "strategy judgment must use AI", "host capabilities remain deterministic"],
+        "pivot_signals": ["users need help during a project, not only before starting", "generic LLM-built services are too common"],
+        "references": ["failed AI wrappers", "successful emotional service loops", "founder postmortems"],
+        "behavior_signals": ["builders repeatedly ask agents for similar dashboards", "mid-project teams need rescue, pivot, and differentiation help"],
+        "success_cases": ["services with strong emotional return loops"],
+        "failure_cases": ["tools with features but no repeat behavior"],
+        "papers": [],
+        "reviews": [],
+        "personal_profile": {
+            "repeated_biases": ["starts from implementation before evidence"],
+            "weak_axes": ["monetization_trigger", "reference_insight"],
+            "overused_solution_patterns": ["dashboard", "assistant"]
+        }
     },
     "update_plan": {
         "goal": "Agent console planning pass",
@@ -105,6 +134,23 @@ def build_adapter(args: argparse.Namespace) -> DeepPlanAdapter:
     )
 
 
+def _strategy_provider_from_args(args: argparse.Namespace) -> Any:
+    provider_name = str(getattr(args, "provider", "") or "").strip()
+    if not provider_name:
+        return None
+    if provider_name == "openai":
+        return openai_provider_from_env(model=str(getattr(args, "model", "") or "").strip())
+    if provider_name == "static":
+        raw_json = str(getattr(args, "static_report_json", "") or "")
+        raw_file = str(getattr(args, "static_report_file", "") or "")
+        if raw_json and raw_file:
+            raise ValueError("use either --static-report-json or --static-report-file, not both")
+        if not raw_json and not raw_file:
+            raise ValueError("static provider requires --static-report-json or --static-report-file")
+        return static_provider_from_json(raw_json or Path(raw_file).read_text(encoding="utf-8"))
+    raise ValueError(f"unknown strategy provider: {provider_name}")
+
+
 def cmd_agents(_: argparse.Namespace) -> int:
     roles = ["planner", "strategist", "researcher", "reviewer"]
     payload = {"ok": True, "roles": []}
@@ -140,7 +186,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         options["step_id"] = args.step_id
 
     adapter = build_adapter(args)
-    event = HostStep(adapter, role=args.role).run_event(
+    event = HostStep(adapter, role=args.role, strategy_provider=_strategy_provider_from_args(args)).run_event(
         {
             "action": args.action,
             "payload": payload,
@@ -155,22 +201,19 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     payload = _load_payload(args)
     adapter = build_adapter(args)
     snapshot = adapter.snapshot()
-    bundle = build_strategy_prompt_bundle(payload, snapshot)
+    bundle = build_strategy_prompt_bundle(payload, snapshot, action=args.action)
     print(_json_dumps({"ok": True, "type": "strategy_prompt", "bundle": bundle}))
     return 0
 
 
 def cmd_llm(args: argparse.Namespace) -> int:
     payload = _load_payload(args)
-    if not args.static_report_json and not args.static_report_file:
-        raise ValueError("llm command currently requires --static-report-json or --static-report-file")
-    if args.static_report_json and args.static_report_file:
-        raise ValueError("use either --static-report-json or --static-report-file, not both")
-    raw_report = args.static_report_json or Path(args.static_report_file).read_text(encoding="utf-8")
-    provider = static_provider_from_json(raw_report)
+    provider = _strategy_provider_from_args(args)
+    if provider is None:
+        raise ValueError("llm command requires --provider openai or --provider static")
     adapter = build_adapter(args)
     snapshot = adapter.snapshot()
-    result = run_strategy_llm(provider, payload=payload, snapshot=snapshot)
+    result = run_strategy_llm(provider, payload=payload, snapshot=snapshot, action=args.action)
     print(_json_dumps(result))
     return 0
 
@@ -220,26 +263,32 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--payload-file", default="")
     run.add_argument("--session-id", default="")
     run.add_argument("--step-id", default="")
+    run.add_argument("--provider", choices=["openai", "static"], default="")
+    run.add_argument("--model", default="")
+    run.add_argument("--static-report-json", default="")
+    run.add_argument("--static-report-file", default="")
     run.set_defaults(func=cmd_run)
 
     prompt = sub.add_parser("prompt", help="Build the strategist LLM prompt bundle without calling a provider.")
     prompt.add_argument(
         "--action",
-        choices=["evaluate_experience_strategy"],
+        choices=["evaluate_experience_strategy", "generate_creative_directions"],
         default="evaluate_experience_strategy",
     )
     prompt.add_argument("--payload-json", default="")
     prompt.add_argument("--payload-file", default="")
     prompt.set_defaults(func=cmd_prompt)
 
-    llm = sub.add_parser("llm", help="Run the strategist LLM boundary with a static JSON provider.")
+    llm = sub.add_parser("llm", help="Run the strategist LLM boundary with an AI provider.")
     llm.add_argument(
         "--action",
-        choices=["evaluate_experience_strategy"],
+        choices=["evaluate_experience_strategy", "generate_creative_directions"],
         default="evaluate_experience_strategy",
     )
     llm.add_argument("--payload-json", default="")
     llm.add_argument("--payload-file", default="")
+    llm.add_argument("--provider", choices=["openai", "static"], default="openai")
+    llm.add_argument("--model", default="")
     llm.add_argument("--static-report-json", default="")
     llm.add_argument("--static-report-file", default="")
     llm.set_defaults(func=cmd_llm)
